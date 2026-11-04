@@ -858,12 +858,22 @@ static void dump_diag_file(void)
 {
     int fd = open("/data/user_de/0/df.root/diag.txt", O_RDONLY);
     if (fd < 0) { printf("diag: not available (%s)\n", strerror(errno)); return; }
-    char b[4097];
-    ssize_t n = read(fd, b, sizeof(b) - 1);
+
+    /* The file easily exceeds 4 KB (ksud --help alone is ~1 KB and
+     * /proc/modules is longer), and truncating it used to hide exactly the
+     * lines we needed. */
+    static char b[32 * 1024 + 1];
+    size_t total = 0;
+    for (;;) {
+        if (total >= sizeof(b) - 1) break;
+        ssize_t n = read(fd, b + total, sizeof(b) - 1 - total);
+        if (n <= 0) break;
+        total += (size_t)n;
+    }
     close(fd);
-    if (n <= 0) { printf("diag: empty\n"); return; }
-    b[n] = '\0';
-    printf("---- diag ----\n%s\n--------------\n", b);
+    if (total == 0) { printf("diag: empty\n"); return; }
+    b[total] = '\0';
+    printf("---- diag (%zu bytes) ----\n%s\n--------------\n", total, b);
 }
 
 /* The payload redirects insmod's stdout/stderr into /dev/dfilog; on timeout
