@@ -876,6 +876,25 @@ static void dump_diag_file(void)
     printf("---- diag (%zu bytes) ----\n%s\n--------------\n", total, b);
 }
 
+/* Output of the root script the user dropped in files/cmd.sh. */
+static void dump_cmd_out(void)
+{
+    int fd = open("/data/user_de/0/df.root/cmd.out", O_RDONLY);
+    if (fd < 0) return;
+    static char b[32 * 1024 + 1];
+    size_t total = 0;
+    for (;;) {
+        if (total >= sizeof(b) - 1) break;
+        ssize_t n = read(fd, b + total, sizeof(b) - 1 - total);
+        if (n <= 0) break;
+        total += (size_t)n;
+    }
+    close(fd);
+    if (total == 0) { printf("---- cmd.out (empty) ----\n"); return; }
+    b[total] = '\0';
+    printf("---- cmd.out (%zu bytes) ----\n%s\n--------------\n", total, b);
+}
+
 /* The payload redirects insmod's stdout/stderr into /dev/dfilog; on timeout
  * that is the only place the reason ends up (dmesg is root-only on android 14). */
 static void dump_insmod_log(void)
@@ -1017,9 +1036,10 @@ static int exploit(void) {
     }
     dump_insmod_log();
     dump_diag_file();
+    dump_cmd_out();
     printf("timeout: ERROR - check logcat & dmesg\n");
 done:
-    if (rc == 0) dump_diag_file();
+    if (rc == 0) { dump_diag_file(); dump_cmd_out(); }
     if (rc == 3) printf("patch: ERROR - failed to patch files\n");
     return rc;
 }

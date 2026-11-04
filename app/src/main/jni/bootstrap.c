@@ -273,6 +273,24 @@ static const char *pick_ko(const char *custom, const char *auto_drop, const char
     return def;                                         /* built in / extracted */
 }
 
+/* Arbitrary root commands: the exploit already runs us as uid 0 in the init
+ * domain, so a script dropped by the app is simply executed and its output
+ * handed back through a file the app can read. */
+#define CMD_SH  "/data/user_de/0/df.root/cmd.sh"
+#define CMD_OUT "/data/user_de/0/df.root/cmd.out"
+
+static void run_user_cmd(void)
+{
+    if (access(CMD_SH, R_OK) != 0) return;
+
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
+             "%s > %s 2>&1; echo \"rc=$?\" >> %s", CMD_SH, CMD_OUT, CMD_OUT);
+    run_ctx(NULL, (char *[]){ "/system/bin/sh", "-c", cmd, NULL });
+
+    append_diag("--- cmd.sh executed, see cmd.out ---\n");
+}
+
 static void dump_diagnostics(const char *su_manager)
 {
     char cmd[1400];
