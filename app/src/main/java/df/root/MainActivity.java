@@ -37,6 +37,7 @@ public class MainActivity extends Activity implements IReporter {
     private static final String TAG = "dfroot";
 
     private Button btnRun;
+    private Button btnOutput;
     private ScrollView outputScroll;
     private TextView outputView;
     private Spinner spinnerSuManager;
@@ -48,6 +49,7 @@ public class MainActivity extends Activity implements IReporter {
     @Override
     public void report(String msg) {
         Log.i(TAG, msg.trim());
+        OutputLog.append(msg);
         mMain.post(() -> {
             outputView.append(msg);
             outputScroll.post(() -> outputScroll.fullScroll(View.FOCUS_DOWN));
@@ -68,6 +70,7 @@ public class MainActivity extends Activity implements IReporter {
             actionBar.setSubtitle("@diabl0w github/xda");
 
         btnRun = findViewById(R.id.btnRun);
+        btnOutput = findViewById(R.id.btnOutput);
         outputScroll = findViewById(R.id.outputScroll);
         outputView = findViewById(R.id.outputView);
         spinnerSuManager = findViewById(R.id.spinnerSuManager);
@@ -114,9 +117,14 @@ public class MainActivity extends Activity implements IReporter {
 
         updateRunButton();
 
+        // no action bar on this device, so the overflow menu is unreachable:
+        // give the full-screen log its own button
+        btnOutput.setOnClickListener(v -> startActivity(new Intent(this, OutputActivity.class)));
+
         btnRun.setOnClickListener(v -> {
             btnRun.setEnabled(false);
             outputView.setText("");
+            OutputLog.clear();
             mExec.execute(this::runExploit);
         });
     }
@@ -129,6 +137,10 @@ public class MainActivity extends Activity implements IReporter {
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == R.id.action_output) {
+            startActivity(new Intent(this, OutputActivity.class));
+            return true;
+        }
         if (item.getItemId() == R.id.action_settings) {
             startActivity(new Intent(this, SettingsActivity.class));
             return true;
