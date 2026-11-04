@@ -552,7 +552,12 @@ private fun BrowserScreen(activity: ComponentActivity, onPicked: (File) -> Unit)
             File("/")
         ).distinctBy { it.absolutePath }.filter { it.exists() }
     }
-    var dir by remember { mutableStateOf(starts.firstOrNull() ?: File("/")) }
+    val storageRoot = remember {
+        listOf(File("/storage/emulated/0"), File("/sdcard"),
+               activity.getExternalFilesDir(null), File("/"))
+            .firstOrNull { it.exists() && it.listFiles() != null } ?: File("/")
+    }
+    var dir by remember { mutableStateOf(storageRoot) }
     var rows by remember { mutableStateOf<List<File>>(emptyList()) }
     var err by remember { mutableStateOf<String?>(null) }
     var tick by remember { mutableStateOf(0) }
@@ -596,11 +601,8 @@ private fun BrowserScreen(activity: ComponentActivity, onPicked: (File) -> Unit)
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            TextButton(onClick = {
-                val p = dir.parentFile
-                if (p != null && p.canRead()) dir = p
-            }) { Text("上级", fontSize = 10.sp) }
             TextButton(onClick = { tick++ }) { Text("刷新", fontSize = 10.sp) }
+            TextButton(onClick = { dir = storageRoot }) { Text("存储根目录", fontSize = 10.sp) }
         }
 
         err?.let {
@@ -611,6 +613,22 @@ private fun BrowserScreen(activity: ComponentActivity, onPicked: (File) -> Unit)
         }
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+            val parent = dir.parentFile
+            if (parent != null) {
+                item(key = "..") {
+                    val up = parent.canRead()
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 44.dp)
+                            .clickable(enabled = up) { if (up) dir = parent }
+                            .padding(vertical = 6.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("📁", fontSize = 14.sp, modifier = Modifier.width(24.dp))
+                        Text("..", color = if (up) OnGrey else Inactive,
+                             fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
             items(rows, key = { it.absolutePath }) { f ->
                 val isDir = f.isDirectory
                 val isKo = !isDir && f.name.endsWith(".ko")
