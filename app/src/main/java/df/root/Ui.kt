@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -536,15 +537,20 @@ private fun KoRow(title: String, sub: String, value: String) {
 
 @Composable
 private fun BrowserScreen(activity: ComponentActivity, onPicked: (File) -> Unit) {
+    /* Only the app's own directories are reliably readable under scoped
+     * storage; the rest are listed so the failure is obvious rather than a
+     * mysteriously empty list. */
     val starts = remember {
         listOfNotNull(
-            activity.createDeviceProtectedStorageContext().filesDir.parentFile,
             activity.getExternalFilesDir(null),
             File("/sdcard/Android/data/df.root/files"),
             File("/sdcard/Download"),
+            File("/storage/emulated/0"),
             File("/sdcard"),
+            File("/data/local/tmp"),
+            activity.createDeviceProtectedStorageContext().filesDir.parentFile,
             File("/")
-        ).distinctBy { it.absolutePath }
+        ).distinctBy { it.absolutePath }.filter { it.exists() }
     }
     var dir by remember { mutableStateOf(starts.firstOrNull() ?: File("/")) }
     var rows by remember { mutableStateOf<List<File>>(emptyList()) }
@@ -552,72 +558,116 @@ private fun BrowserScreen(activity: ComponentActivity, onPicked: (File) -> Unit)
     var tick by remember { mutableStateOf(0) }
 
     LaunchedEffect(dir, tick) {
-        val (list, e) = withContext(Dispatchers.IO) {
-            val f = dir.listFiles()
-            if (f == null) Pair(emptyList<File>(), "无法读取（scoped storage 或权限不足）")
-            else Pair(f.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })), null)
+        val (list, why) = withContext(Dispatchers.IO) {
+            val all = dir.listFiles()
+            if (all == null) {
+                Pair(emptyList<File>(), when {
+                    !dir.exists() -> "目录不存在"
+                    !dir.canRead() -> "无读取权限（scoped storage）"
+                    else -> "读取失败"
+                })
+            } else {
+                Pair(
+                    all.sortedWith(
+                        compareBy({ !it.isDirectory }, { !it.name.endsWith(".ko") },
+                                  { it.name.lowercase() })
+                    ), null
+                )
+            }
         }
         rows = list
-        err = e
+        err = why
     }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp)) {
-        Text("选择 .ko", color = OnGrey, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text("选择内核模块", color = OnGrey, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         Text(dir.absolutePath, color = Inactive, fontSize = 9.sp,
              fontFamily = FontFamily.Monospace, maxLines = 2)
+        if (dir.absolutePath.endsWith("df.root/files")) {
+            Text("adb push xxx.ko 到这里", color = Inactive, fontSize = 9.sp)
+        }
 
-        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             starts.take(4).forEach { r ->
                 TextButton(onClick = { dir = r }) {
-                    Text(r.name.ifEmpty { "/" }, fontSize = 9.sp)
+                    Text(shortName(r), fontSize = 9.sp)
                 }
             }
         }
-
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             TextButton(onClick = {
-                dir.parentFile?.let { if (it.canRead()) dir = it }
+                val p = dir.parentFile
+                if (p != null && p.canRead()) dir = p
             }) { Text("上级", fontSize = 10.sp) }
             TextButton(onClick = { tick++ }) { Text("刷新", fontSize = 10.sp) }
         }
 
-        err?.let { Text(it, color = OnRed, fontSize = 9.sp) }
+        err?.let {
+            Text(it, color = OnRed, fontSize = 10.sp, modifier = Modifier.padding(vertical = 2.dp))
+        }
+        if (err == null && rows.isEmpty()) {
+            Text("（空）", color = Inactive, fontSize = 10.sp)
+        }
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
             items(rows, key = { it.absolutePath }) { f ->
                 val isDir = f.isDirectory
-                /* kernelsu.ko ships as libkernelsu.so, so both suffixes count */
-                val isKo = f.name.endsWith(".ko") || f.name.endsWith(".so")
+                val isKo = !isDir && f.name.endsWith(".ko")
+                val readable = f.canRead()
                 Row(
-                    Modifier.fillMaxWidth()
-                        .clickable(enabled = isDir || isKo) {
+                    Modifier.fillMaxWidth().heightIn(min = 44.dp)
+                        .clickable(enabled = isDir || readable) {
                             if (isDir) dir = f else onPicked(f)
                         }
-                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                        .padding(vertical = 6.dp, horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         when {
                             isDir -> "📁"
                             isKo -> "⬇"
-                            else -> "·"
+                            else -> "📄"
                         },
-                        fontSize = 13.sp, modifier = Modifier.width(22.dp)
+                        fontSize = 14.sp,
+                        modifier = Modifier.width(24.dp)
                     )
                     Column(Modifier.weight(1f)) {
                         Text(
                             f.name + if (isDir) "/" else "",
-                            color = if (isDir || isKo) OnGrey else Inactive,
+                            color = when {
+                                !readable -> Inactive
+                                isDir || isKo -> OnGrey
+                                else -> Inactive
+                            },
                             fontSize = 12.sp, maxLines = 1
                         )
-                        if (isKo) Text(describeElf(f), color = Inactive, fontSize = 9.sp,
-                                       fontFamily = FontFamily.Monospace)
+                        if (!isDir) {
+                            Text(
+                                if (isKo) describeElf(f) else humanSize(f.length()),
+                                color = Inactive, fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
                     }
                 }
             }
         }
     }
+}
+
+private fun shortName(f: File): String = when (f.absolutePath) {
+    "/sdcard/Android/data/df.root/files" -> "files"
+    "/storage/emulated/0", "/sdcard" -> "sdcard"
+    "/data/local/tmp" -> "tmp"
+    "/" -> "/"
+    else -> f.name.ifEmpty { "/" }
+}
+
+private fun humanSize(n: Long): String = when {
+    n >= 1_048_576L -> "%.1f MB".format(n / 1048576.0)
+    n >= 1024L -> "%.1f KB".format(n / 1024.0)
+    else -> "$n 字节"
 }
 
 private fun elfArch(f: File): String {
