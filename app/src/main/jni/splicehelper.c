@@ -104,6 +104,30 @@ void start_c(void *argblock) {
     if (file_fd < 0)
         mysyscall1(4, __NR_exit_group);          /* open failed */
 
+    if (mode && streq(mode, "P")) {
+        /* Pin every page of the staged file into OUT_FD and then sleep for
+         * ever. A pipe buffer holds a struct page reference, so the kernel
+         * cannot reclaim the page - which is exactly what keeps the patched
+         * module from turning back into the original .so under memory
+         * pressure. The parent keeps the read end open; killing this process
+         * (or closing both ends) releases the pages again.
+         * Exit codes: 7 = nothing could be pinned. */
+        off_arg_t off = 0;
+        long total = 0;
+        for (;;) {
+            long n = mysyscall6((unsigned long)file_fd, (unsigned long)&off,
+                                OUT_FD, (unsigned long)0, 65536, 0, __NR_splice);
+            if (n <= 0) break;
+            total += n;
+            if (total >= 65536) break;
+        }
+        if (total <= 0)
+            mysyscall1(7, __NR_exit_group);
+        static const long ts[2] = { 3600, 0 };   /* aarch64 has no pause(2) */
+        for (;;)
+            mysyscall3((unsigned long)ts, 0, 0, __NR_nanosleep);
+    }
+
     if (mode && streq(mode, "s")) {
         /* Size probe: lseek(SEEK_END) and return 8 bytes to OUT_FD. The target
          * vendor file cannot be stat()ed from an untrusted_app context. */
