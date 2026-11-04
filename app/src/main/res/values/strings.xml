@@ -21,4 +21,11 @@
     <string name="action_settings">设置</string>
     <string name="chooser_title">选择 SU 管理器</string>
     <string name="no_manager">没有找到带 ksud 的管理器</string>
+
+    <string name="page_settings">设置与关于</string>
+    <string name="card_about">关于</string>
+    <string name="card_about_sub">版本与致谢</string>
+    <string name="card_settings_sub">启动方式、模块、adbd</string>
+    <string name="about_title">关于 DFRoot</string>
+    <string name="about_body">DFRoot 4.7（arm32 移植版）\n\n利用 CVE-2026-43284 通过内核页缓存写原语加载自定义内核模块，不需要解锁 bootloader。\n\n原项目：diabl0w/DFRoot\n本分支：在 32 位用户态（arm64 内核）上工作，已在 Xiaomi Watch 2 Pro 验证。\n\n致谢：lspromise、DFReroot、DirtyInit</string>
 </resources>
