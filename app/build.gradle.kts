@@ -11,6 +11,7 @@ if (signingPropsFile.exists()) signingProps.load(signingPropsFile.inputStream())
 android {
     namespace = "df.root"
     compileSdk = 37
+    ndkVersion = "28.2.13676358"
 
     buildFeatures {
         buildConfig = true

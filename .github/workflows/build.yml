@@ -86,6 +86,25 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
+      # AGP installs the NDK on demand, but that download occasionally comes
+      # back corrupted ("Error reading Zip content from a SeekableByteChannel").
+      # Install it up front, with retries, so a flaky mirror does not fail the run.
+      - name: Install NDK
+        run: |
+          set -eu
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          for i in 1 2 3; do
+            if yes | "$SDKMANAGER" --install "ndk;28.2.13676358" >/dev/null 2>&1; then
+              echo "NDK installed on attempt $i"
+              break
+            fi
+            echo "NDK install attempt $i failed, cleaning up and retrying"
+            rm -rf "$ANDROID_HOME/ndk/28.2.13676358"
+            sleep 10
+            if [ "$i" = 3 ]; then echo "::error::NDK install failed after 3 attempts"; exit 1; fi
+          done
+          ls "$ANDROID_HOME/ndk"
+
       - name: Build DFRoot APK
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
