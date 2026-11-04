@@ -102,7 +102,7 @@ void start_c(void *argblock) {
         (unsigned long)O_RDONLY,
         __NR_openat);
     if (file_fd < 0)
-        mysyscall1(1, __NR_exit_group);
+        mysyscall1(4, __NR_exit_group);          /* open failed */
 
     if (mode && streq(mode, "r")) {
         /* Read mode: lseek to offset, read 16 bytes, write to OUT_FD */
@@ -127,7 +127,16 @@ void start_c(void *argblock) {
         16,
         SPLICE_F_MOVE,
         __NR_splice);
-    mysyscall1((unsigned long)(ret == 16 ? 0 : 1), __NR_exit_group);
+    /* Exit codes the parent can decode:
+     *   0        ok
+     *   0x4x|n   splice failed, n = errno
+     *   0x3x|n   short splice, n = bytes moved
+     */
+    if (ret == 16)
+        mysyscall1(0, __NR_exit_group);
+    if (ret < 0)
+        mysyscall1(0x40 | (unsigned long)((-ret) & 0x3f), __NR_exit_group);
+    mysyscall1(0x30 | (unsigned long)(ret & 0xf), __NR_exit_group);
 }
 
 __attribute__((naked)) void _start() {
