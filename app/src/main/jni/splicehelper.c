@@ -50,7 +50,10 @@ static inline long mysyscall6(unsigned long a0, unsigned long a1,
     return r0;
 }
 
-typedef unsigned long off_arg_t;
+/* Must be 8 bytes: splice()/lseek() take a loff_t*, and the kernel always
+ * reads 8 bytes from that pointer. A 32-bit off_t on arm32 makes it read
+ * stack garbage as the upper half and splice() fails with EINVAL. */
+typedef unsigned long long off_arg_t;
 #else
 /* ---- aarch64: syscall nr in x8, args in x0-x5 ---- */
 __attribute__((naked)) static long mysyscall1(unsigned long arg0, unsigned long nr) {

