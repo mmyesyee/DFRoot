@@ -183,7 +183,8 @@ static void dump_diagnostics(const char *su_manager)
 {
     char cmd[1400];
     snprintf(cmd, sizeof(cmd),
-             "{ echo '=== /data/adb ==='; ls -la /data/adb; "
+             "{ echo '=== bootstrap build ==='; echo build " __DATE__ " " __TIME__ "; "
+             "echo '=== /data/adb ==='; ls -la /data/adb; "
              "echo '=== ksud --help ==='; %s --help; echo rc=$?; "
              "echo '=== ksud late-load --help ==='; %s late-load --help; echo rc=$?; "
              "echo '=== ksud late-load (verbose retry) ==='; "
