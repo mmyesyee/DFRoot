@@ -62,68 +62,9 @@
                 android:textSize="10sp" />
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- SU manager: what the exploit will hand to ksud -->
+        <!-- the one action: everything else lives behind it -->
         <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardManager"
-            android:layout_width="match_parent"
-            android:layout_height="72dp"
-            android:layout_marginTop="10dp"
-            android:clickable="true"
-            android:focusable="true"
-            app:cardBackgroundColor="@color/card_manager"
-            app:cardCornerRadius="36dp"
-            app:cardElevation="0dp"
-            app:strokeWidth="0dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp">
-
-                <ImageView
-                    android:layout_width="26dp"
-                    android:layout_height="26dp"
-                    android:layout_marginEnd="12dp"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_warn"
-                    android:tint="@color/on_card_manager" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:id="@+id/tvManagerTitle"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:ellipsize="end"
-                        android:maxLines="1"
-                        android:text="@string/card_manager_none"
-                        android:textColor="@color/on_card_manager"
-                        android:textSize="15sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/tvManagerSub"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:ellipsize="end"
-                        android:maxLines="1"
-                        android:text="@string/card_manager_tap"
-                        android:textColor="@color/on_card_manager"
-                        android:textSize="12sp" />
-                </LinearLayout>
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- the action -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardRun"
+            android:id="@+id/cardJailbreak"
             android:layout_width="match_parent"
             android:layout_height="72dp"
             android:layout_marginTop="10dp"
@@ -157,78 +98,19 @@
                     android:orientation="vertical">
 
                     <TextView
-                        android:id="@+id/tvRunTitle"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:ellipsize="end"
-                        android:maxLines="1"
-                        android:text="@string/card_run_none"
+                        android:text="@string/card_jailbreak"
                         android:textColor="@color/on_card_run"
-                        android:textSize="15sp"
+                        android:textSize="16sp"
                         android:textStyle="bold" />
 
                     <TextView
-                        android:id="@+id/tvRunSub"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:ellipsize="end"
-                        android:maxLines="1"
-                        android:text="@string/card_run_none_sub"
+                        android:text="@string/card_jailbreak_sub"
                         android:textColor="@color/on_card_run"
                         android:textSize="12sp" />
-                </LinearLayout>
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- full log -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardOutput"
-            android:layout_width="match_parent"
-            android:layout_height="60dp"
-            android:layout_marginTop="10dp"
-            android:clickable="true"
-            android:focusable="true"
-            app:cardBackgroundColor="@color/card_neutral"
-            app:cardCornerRadius="30dp"
-            app:cardElevation="0dp"
-            app:strokeWidth="0dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp">
-
-                <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:layout_marginEnd="12dp"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_log"
-                    android:tint="@color/on_card_neutral" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/card_output"
-                        android:textColor="@color/on_card_neutral"
-                        android:textSize="14sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/card_output_sub"
-                        android:textColor="@color/on_card_neutral"
-                        android:textSize="11sp" />
                 </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

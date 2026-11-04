@@ -23,6 +23,11 @@
         </activity>
 
         <activity
+            android:name=".JailbreakActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
             android:name=".OutputActivity"
             android:exported="false"
             android:parentActivityName=".MainActivity" />

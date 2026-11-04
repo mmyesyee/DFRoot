@@ -23,6 +23,18 @@
     <string name="no_manager">没有找到带 ksud 的管理器</string>
 
     <string name="page_settings">设置与关于</string>
+
+    <string name="card_jailbreak">点击越狱</string>
+    <string name="card_jailbreak_sub">选择管理器并开始</string>
+    <string name="jailbreak_title">越狱</string>
+    <string name="card_pick_manager">选择 root 管理器</string>
+    <string name="card_pick_manager_none">未选择 / 点击查看</string>
+    <string name="card_pick_manager_change">已选择 / 点击更换</string>
+    <string name="card_start">开始越狱</string>
+    <string name="card_start_ready">点击开始</string>
+    <string name="card_start_busy">执行中… 详情见输出</string>
+    <string name="card_start_done">本次已完成，重启后失效</string>
+    <string name="card_start_blocked">请先选择一个 root 管理器</string>
     <string name="card_about">关于</string>
     <string name="card_about_sub">版本与致谢</string>
     <string name="card_settings_sub">启动方式、模块、adbd</string>
