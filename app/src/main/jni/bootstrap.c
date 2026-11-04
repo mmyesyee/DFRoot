@@ -189,11 +189,19 @@ static void dump_diagnostics(const char *su_manager)
              "echo '=== ksud late-load --help ==='; %s late-load --help; echo rc=$?; "
              "echo '=== ksud late-load (verbose retry) ==='; "
              "%s late-load --package-name %s; echo rc=$?; "
+             "echo '=== /data/adb/ksu ==='; ls -la /data/adb/ksu; "
+             "echo '=== any .ko in /data/adb ==='; find /data/adb -name '*.ko' 2>/dev/null; "
+             "echo '=== late-load --kmi android14-11 ==='; "
+             "%s late-load --package-name %s --kmi android14-11; echo rc=$?; "
+             "echo '=== late-load --allow-shell ==='; "
+             "%s late-load --package-name %s --allow-shell; echo rc=$?; "
+             "echo '=== still no module? ==='; cat /proc/modules | grep -i ksu; echo rc=$?; "
              "echo '=== /proc/modules ==='; cat /proc/modules; "
              "echo '=== processes ==='; ps -A | grep -iE 'ksu|dfroot'; "
              "echo '=== dmesg ==='; dmesg | grep -iE 'ksu|kernelsu|module|avc' | tail -40; "
              "} > %s 2>&1",
-             KSUD_STAGE, KSUD_STAGE, KSUD_STAGE, su_manager, DIAG_PATH);
+             KSUD_STAGE, KSUD_STAGE, KSUD_STAGE, su_manager,
+             KSUD_STAGE, su_manager, KSUD_STAGE, su_manager, DIAG_PATH);
     run_ctx(NULL, (char *[]){ "/system/bin/sh", "-c", cmd, NULL });
 }
 
