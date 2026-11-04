@@ -179,15 +179,20 @@ static void restart_adbd_as_root(void)
 
 /* We run as root here, but the app (and adb shell) cannot read /data/adb or
  * dmesg, so dump everything we can see into a file the app owns. */
-static void dump_diagnostics(void)
+static void dump_diagnostics(const char *su_manager)
 {
-    char cmd[768];
+    char cmd[1400];
     snprintf(cmd, sizeof(cmd),
-             "{ echo '=== /data/adb ==='; ls -l /data/adb; "
-             "echo '=== /proc/modules (ksu/dfroot) ==='; cat /proc/modules | grep -iE 'ksu|dfroot'; "
+             "{ echo '=== /data/adb ==='; ls -la /data/adb; "
+             "echo '=== ksud --help ==='; %s --help; echo rc=$?; "
+             "echo '=== ksud late-load --help ==='; %s late-load --help; echo rc=$?; "
+             "echo '=== ksud late-load (verbose retry) ==='; "
+             "%s late-load --package-name %s; echo rc=$?; "
+             "echo '=== /proc/modules ==='; cat /proc/modules; "
              "echo '=== processes ==='; ps -A | grep -iE 'ksu|dfroot'; "
-             "echo '=== dmesg ==='; dmesg | grep -iE 'ksu|kernelsu|dfroot|avc' | tail -40; "
-             "} > %s 2>&1", DIAG_PATH);
+             "echo '=== dmesg ==='; dmesg | grep -iE 'ksu|kernelsu|module|avc' | tail -40; "
+             "} > %s 2>&1",
+             KSUD_STAGE, KSUD_STAGE, KSUD_STAGE, su_manager, DIAG_PATH);
     run_ctx(NULL, (char *[]){ "/system/bin/sh", "-c", cmd, NULL });
 }
 
@@ -246,7 +251,7 @@ int main(void)
 
     touch("/dev/dfm5");    
     if (run_ctx(NULL, (char *[]){ KSUD_STAGE, "late-load", "--package-name", su_manager, NULL }) == 0) {
-        dump_diagnostics();
+        dump_diagnostics(su_manager);
         touch("/dev/dfm6");
         if (adb_root) {
             restart_adbd_as_root();
@@ -257,7 +262,7 @@ int main(void)
             run_ctx("u:r:ksu:s0", (char *[]){ KSUD, "soft-reboot", NULL });
         }
     } else {
-        dump_diagnostics();
+        dump_diagnostics(su_manager);
         touch("/dev/dfme2");
     }
         
