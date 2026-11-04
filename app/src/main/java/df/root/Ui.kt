@@ -41,6 +41,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -328,7 +331,11 @@ private fun ManagerScreen(state: AppState, onPicked: () -> Unit) {
 @Composable
 private fun OutputScreen() {
     var text by remember { mutableStateOf(OutputLog.get()) }
+    var info by remember { mutableStateOf<String?>(null) }
     val scroll = rememberScrollState()
+    val clipboard = LocalClipboardManager.current
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -340,11 +347,36 @@ private fun OutputScreen() {
 
     Column(Modifier.fillMaxSize().padding(8.dp)) {
         Text("输出", color = OnGrey, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+
         Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll)) {
             Text(text, color = OnGrey, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
         }
+
+        info?.let {
+            Text(it, color = Good, fontSize = 9.sp, maxLines = 2,
+                 modifier = Modifier.padding(bottom = 4.dp))
+        }
+
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            TextButton(onClick = { OutputLog.clear(); text = "" }) { Text("清空") }
+            TextButton(onClick = {
+                clipboard.setText(AnnotatedString(text))
+                info = "已复制 ${text.length} 字"
+            }) { Text("复制") }
+
+            TextButton(onClick = {
+                scope.launch {
+                    info = try {
+                        val dir = ctx.getExternalFilesDir(null) ?: ctx.filesDir
+                        val f = File(dir, "dfroot-${System.currentTimeMillis()}.log")
+                        withContext(Dispatchers.IO) { f.writeText(text) }
+                        "已导出 ${f.absolutePath}"
+                    } catch (t: Throwable) {
+                        "导出失败: ${t.message}"
+                    }
+                }
+            }) { Text("导出") }
+
+            TextButton(onClick = { OutputLog.clear(); text = ""; info = null }) { Text("清空") }
         }
     }
 }
