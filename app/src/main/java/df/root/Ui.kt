@@ -38,6 +38,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -69,7 +70,7 @@ private const val ABOUT = "DFRoot 4.7 · arm32 移植版\n\n" +
         "已在 Xiaomi Watch 2 Pro 验证。\n\n" +
         "致谢：lspromise、DFReroot、DirtyInit"
 
-private enum class Route { Home, Jailbreak, Output, Settings }
+private enum class Route { Home, Jailbreak, Managers, Output, Settings }
 
 /** Everything the screens need, hoisted out of composition so a run survives
  *  navigating away and back. */
@@ -86,6 +87,10 @@ private class AppState(val activity: ComponentActivity) {
         managers = SuManagerInfo.load(activity)
         selected = SuManagerInfo.savedIndex(activity, managers)
         done = File("/dev/dfm6").exists()
+    }
+
+    fun note(msg: String) {
+        message = msg
     }
 
     fun select(index: Int) {
@@ -142,7 +147,12 @@ fun DfRootApp(activity: ComponentActivity) {
             Route.Jailbreak -> JailbreakScreen(
                 state = state,
                 scope = scope,
+                onPickManagers = { route = Route.Managers },
                 onOutput = { route = Route.Output })
+
+            Route.Managers -> ManagerScreen(
+                state = state,
+                onPicked = { route = Route.Jailbreak })
 
             Route.Output -> OutputScreen()
             Route.Settings -> SettingsScreen(activity)
@@ -208,8 +218,12 @@ private fun MorePage(onSettings: () -> Unit) {
 }
 
 @Composable
-private fun JailbreakScreen(state: AppState, scope: CoroutineScope, onOutput: () -> Unit) {
-    var choosing by remember { mutableStateOf(false) }
+private fun JailbreakScreen(
+    state: AppState,
+    scope: CoroutineScope,
+    onPickManagers: () -> Unit,
+    onOutput: () -> Unit,
+) {
     val has = state.selected in state.managers.indices
 
     Column(
@@ -226,23 +240,33 @@ private fun JailbreakScreen(state: AppState, scope: CoroutineScope, onOutput: ()
             subtitle = if (has) state.managers[state.selected].label.toString() + " · 点击更换"
                        else "未选择 / 点击查看",
             enabled = !state.running,
-            onClick = { choosing = true }
+            onClick = onPickManagers
         )
         Spacer(Modifier.height(10.dp))
 
+        val canStart = has && !state.done && !state.running
         Pill(
             bg = if (state.done) Blue else Red,
             fg = if (state.done) OnBlue else OnRed,
             glyph = "⚡",
             title = if (state.done) "越狱完成" else "开始越狱",
             subtitle = when {
-                state.done -> "重启后失效"
+                state.done -> "已越狱 · 重启后可再次执行"
                 state.running -> "执行中… 详情见输出"
                 has -> "点击开始"
                 else -> "请先选择一个 root 管理器"
             },
-            enabled = has && !state.done && !state.running,
-            onClick = { state.start(scope) }
+            /* always tappable: a dead card looks broken, an explanation does not */
+            enabled = true,
+            alpha = if (canStart) 1f else 0.65f,
+            onClick = {
+                when {
+                    state.running -> state.note("正在执行，请看输出")
+                    state.done -> state.note("本次已经越狱，重启手表后才能再执行")
+                    !has -> state.note("请先选择一个 root 管理器")
+                    else -> state.start(scope)
+                }
+            }
         )
         Spacer(Modifier.height(10.dp))
 
@@ -254,28 +278,40 @@ private fun JailbreakScreen(state: AppState, scope: CoroutineScope, onOutput: ()
         }
     }
 
-    if (choosing) {
-        AlertDialog(
-            onDismissRequest = { choosing = false },
-            title = { Text("选择 root 管理器") },
-            text = {
-                Column {
-                    state.managers.forEachIndexed { i, m ->
-                        Text(
-                            m.label.toString(),
-                            Modifier.fillMaxWidth()
-                                .clickable { state.select(i); choosing = false }
-                                .padding(vertical = 10.dp)
-                        )
-                    }
-                    if (state.managers.isEmpty())
-                        Text("没有找到带 ksud 的管理器", fontSize = 12.sp)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { choosing = false }) { Text("取消") }
-            }
-        )
+}
+
+@Composable
+private fun ManagerScreen(state: AppState, onPicked: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("选择管理器", color = OnGrey, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(10.dp))
+
+        if (state.managers.isEmpty()) {
+            Text(
+                "没有找到带 ksud 的管理器",
+                color = Inactive, fontSize = 12.sp,
+                modifier = Modifier.padding(top = 20.dp)
+            )
+            return@Column
+        }
+
+        state.managers.forEachIndexed { i, m ->
+            val picked = i == state.selected
+            Pill(
+                bg = if (picked) Yellow else Grey,
+                fg = if (picked) OnYellow else OnGrey,
+                glyph = if (picked) "✓" else "⚙",
+                title = m.label.toString(),
+                subtitle = m.packageName,
+                height = 64,
+                onClick = { state.select(i); onPicked() }
+            )
+            Spacer(Modifier.height(8.dp))
+        }
     }
 }
 
@@ -348,11 +384,13 @@ private fun Pill(
     subtitle: String,
     height: Int = 72,
     enabled: Boolean = true,
+    alpha: Float = 1f,
     onClick: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth()
             .height(height.dp)
+            .alpha(alpha)
             .clip(RoundedCornerShape((height / 2).dp))
             .background(if (enabled) bg else bg.copy(alpha = 0.55f))
             .clickable(enabled = enabled) { onClick() }
