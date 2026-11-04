@@ -254,11 +254,6 @@ private fun HomePage(state: AppState, onJailbreak: () -> Unit, onOutput: () -> U
         Spacer(Modifier.height(10.dp))
         InfoCard(state)
         Spacer(Modifier.height(10.dp))
-        Spacer(Modifier.height(10.dp))
-        Pill(Grey, OnGrey, "⬇", "加载自定义 KO", "查看/更换要加载的内核模块",
-             height = 60, onClick = onKo)
-
-        Spacer(Modifier.height(10.dp))
         Pill(Grey, OnGrey, "☰", "输出", "查看完整日志", height = 60, onClick = onOutput)
     }
 }
@@ -330,8 +325,6 @@ private fun JailbreakScreen(
                 }
             }
         )
-        Spacer(Modifier.height(10.dp))
-
         Spacer(Modifier.height(10.dp))
         Pill(Grey, OnGrey, "⬇", "加载自定义 KO", "查看/更换要加载的内核模块",
              height = 60, onClick = onKo)
