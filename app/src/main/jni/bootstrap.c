@@ -196,12 +196,18 @@ static void dump_diagnostics(const char *su_manager)
              "echo '=== late-load --allow-shell ==='; "
              "%s late-load --package-name %s --allow-shell; echo rc=$?; "
              "echo '=== still no module? ==='; cat /proc/modules | grep -i ksu; echo rc=$?; "
+             "echo '=== ksud insmod our own dfroot.ko ==='; "
+             "%s insmod /data/user_de/0/df.root/ko; echo rc=$?; "
+             "echo '=== ksud insmod kernelsu.ko ==='; "
+             "%s insmod /data/user_de/0/df.root/kernelsu.ko; echo rc=$?; "
+             "echo '=== modules with ksu now? ==='; cat /proc/modules | grep -i ksu; echo rc=$?; "
              "echo '=== /proc/modules ==='; cat /proc/modules; "
              "echo '=== processes ==='; ps -A | grep -iE 'ksu|dfroot'; "
              "echo '=== dmesg ==='; dmesg | grep -iE 'ksu|kernelsu|module|avc' | tail -40; "
              "} > %s 2>&1",
              KSUD_STAGE, KSUD_STAGE, KSUD_STAGE, su_manager,
-             KSUD_STAGE, su_manager, KSUD_STAGE, su_manager, DIAG_PATH);
+             KSUD_STAGE, su_manager, KSUD_STAGE, su_manager,
+             KSUD_STAGE, KSUD_STAGE, DIAG_PATH);
     run_ctx(NULL, (char *[]){ "/system/bin/sh", "-c", cmd, NULL });
 }
 
