@@ -98,6 +98,65 @@ static int spawn_crash_dump(off64_t offset, int write_fd, int target_fd, const c
     return st;
 }
 
+/* Ask the bridge for the size of a file it can open but we cannot stat. */
+static int probe_file_size(const char *path, uint64_t *out)
+{
+    (void)path;
+    int rdpipe[2];
+    if (pipe(rdpipe) < 0) return -1;
+    int status = spawn_crash_dump(0, rdpipe[1], 0, "s");
+    close(rdpipe[1]);
+    unsigned char b[8] = {0};
+    int n = 0;
+    if (status >= 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0)
+        n = (int)TEMP_FAILURE_RETRY(read(rdpipe[0], b, 8));
+    close(rdpipe[0]);
+    if (n != 8) return -1;
+    uint64_t v = 0;
+    for (int i = 0; i < 8; i++) v |= (uint64_t)b[i] << (8 * i);
+    *out = v;
+    return 0;
+}
+
+/* Pick a staging file the kernel module actually fits into. The vendor files
+ * cannot be stat()ed from untrusted_app, so every candidate is probed through
+ * the bridge. Returns 0 and leaves libcxx_ko_target pointing at a file that is
+ * >= need bytes long. */
+static int try_ko_targets(size_t need)
+{
+#if DF_TARGET32
+    static const char *const cand[] = {
+        "/vendor/lib/libbinderdebug.so",
+        "/vendor/lib/libstagefrighthw.so",
+        "/vendor/lib/libstagefright_aidl_bufferpool2.so",
+    };
+#else
+    static const char *const cand[] = {
+        "/vendor/lib64/libbinderdebug.so",
+        "/vendor/lib64/libstagefrighthw.so",
+        "/vendor/lib64/libstagefright_aidl_bufferpool2.so",
+    };
+#endif
+    size_t n = sizeof(cand) / sizeof(cand[0]);
+
+    for (size_t i = 0; i < n; i++) {
+        strncpy(libcxx_ko_target, cand[i], 63);
+        libcxx_ko_target[63] = '\0';
+        uint64_t sz = 0;
+        if (probe_file_size(cand[i], &sz) != 0) {
+            printf("staging probe %s: unreadable\n", cand[i]);
+            continue;
+        }
+        printf("staging probe %s: %llu bytes (need %zu)\n",
+               cand[i], (unsigned long long)sz, need);
+        if (sz >= need) return 0;
+    }
+
+    strncpy(libcxx_ko_target, cand[0], 63);
+    libcxx_ko_target[63] = '\0';
+    return -1;
+}
+
 /* ELF identity of whatever is currently sitting in the bridge's page cache.
  * Our splicehelper is a static ET_EXEC (e_type 2); the stock crash_dump32 is a
  * PIE (e_type 3). If the page cache got evicted and re-read from disk, the
@@ -449,6 +508,13 @@ static int patch_ko(void) {
     size_t len;
     char *buf = pad16(ko->start, (size_t)(ko->end - ko->start), &len);
     if (!buf) { printf("patch: %s - pad16 alloc failed\n", libcxx_ko_target); return -1; }
+
+    if (try_ko_targets(len) != 0) {
+        printf("no staging file is large enough for a %zu byte module\n", len);
+        free(buf);
+        return -1;
+    }
+
     printf("patch: %s <- dfroot.ko (%zu bytes)\n", libcxx_ko_target, len);
     int ret = patch_file_cbc(libcxx_ko_target, buf, len, 0, 1);
     free(buf);

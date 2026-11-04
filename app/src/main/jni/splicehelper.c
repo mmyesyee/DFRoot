@@ -104,6 +104,17 @@ void start_c(void *argblock) {
     if (file_fd < 0)
         mysyscall1(4, __NR_exit_group);          /* open failed */
 
+    if (mode && streq(mode, "s")) {
+        /* Size probe: lseek(SEEK_END) and return 8 bytes to OUT_FD. The target
+         * vendor file cannot be stat()ed from an untrusted_app context. */
+        long sz = mysyscall3((unsigned long)file_fd, 0, SEEK_END, __NR_lseek);
+        unsigned long long s64 = (unsigned long long)sz;
+        unsigned char out[8];
+        for (int j = 0; j < 8; j++) out[j] = (unsigned char)(s64 >> (8 * j));
+        long w = mysyscall3(OUT_FD, (unsigned long)out, 8, __NR_write);
+        mysyscall1((unsigned long)(w == 8 ? 0 : 2), __NR_exit_group);
+    }
+
     if (mode && streq(mode, "r")) {
         /* Read mode: lseek to offset, read 16 bytes, write to OUT_FD */
         /* Exit codes: 0=ok, 1=read<16, 2=write<16, 3=OUT_FD not a pipe (fd sanitized) */
