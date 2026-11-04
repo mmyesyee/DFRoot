@@ -787,6 +787,20 @@ static int hex_to_bytes(const char *hex, uint8_t *out, size_t len) {
     return 0;
 }
 
+/* The payload redirects insmod's stdout/stderr into /dev/dfilog; on timeout
+ * that is the only place the reason ends up (dmesg is root-only on android 14). */
+static void dump_insmod_log(void)
+{
+    int fd = open("/dev/dfilog", O_RDONLY);
+    if (fd < 0) { printf("insmod log: open failed: %s\n", strerror(errno)); return; }
+    char b[513];
+    ssize_t n = read(fd, b, sizeof(b) - 1);
+    close(fd);
+    if (n <= 0) { printf("insmod log: empty (%zd)\n", n); return; }
+    b[n] = '\0';
+    printf("---- insmod log ----\n%s\n--------------------\n", b);
+}
+
 static void usage(const char *argv0) {
     fprintf(stderr,
             "usage: %s --encap-port N --sender-port N --spi N --aes-key HEX\n", argv0);
@@ -886,6 +900,7 @@ static int exploit(void) {
             }
         }
     }
+    dump_insmod_log();
     printf("timeout: ERROR - check logcat & dmesg\n");
 done:
     if (rc == 3) printf("patch: ERROR - failed to patch files\n");

@@ -40,6 +40,7 @@
     .equ SYS_open,              5
     .equ SYS_close,             6
     .equ SYS_execve,           11
+    .equ SYS_dup2,             63
     .equ SYS_lseek,            19
     .equ SYS_getpid,           20
     .equ SYS_clone,           120

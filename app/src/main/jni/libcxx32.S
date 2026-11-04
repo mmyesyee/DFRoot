@@ -36,6 +36,7 @@ step2:  .asciz "/dev/dfw2"
 step3:  .asciz "/dev/dfw3"
 step4:  .asciz "/dev/dfw4"
 step5:  .asciz "/dev/dfw5"
+log_path: .asciz "/dev/dfilog"
 ko_target:
     .ascii "/vendor/lib/libbinderdebug.so\0"
     .skip 34, 0                             // pad to 64 bytes — longest candidate path
@@ -119,6 +120,30 @@ libcxx_start:
 
     // ── grandchild: insmod the KO as vendor_modprobe ──────────────────────
     mark    step2
+
+    // insmod's error text would otherwise go to init's /dev/null. Open the log
+    // here, while we are still in the init domain, and hand the fds to the
+    // exec'd insmod via inheritance (no re-check after the domain switch).
+    mvn     r0, #~AT_FDCWD
+    adr     r1, log_path
+    movw    r2, #(O_CREAT|O_WRONLY|O_TRUNC)     @ 0x0241
+    movw    r3, #438                            @ 0666
+    movw    r7, #SYS_openat
+    svc     #0
+    mov     r4, r0
+    cmp     r4, #0
+    blt     1f
+    mov     r0, r4
+    movs    r1, #1
+    movw    r7, #SYS_dup2
+    svc     #0
+    mov     r0, r4
+    movs    r1, #2
+    movw    r7, #SYS_dup2
+    svc     #0
+    movs    r0, #0
+    blt     1f
+1:
     // open /proc/self/attr/exec
     mvn     r0, #~AT_FDCWD
     adr     r1, attr_exec
