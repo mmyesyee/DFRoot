@@ -11,6 +11,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -72,6 +73,7 @@ private val OnBlue = Color(0xFFE3ECFF)
 private val Grey = Color(0xFF262626)
 private val OnGrey = Color(0xFFE6E1E5)
 private val Inactive = Color(0xFF5A5A5A)
+private val Outline = Color(0xFF3C3C3C)
 private val Good = Color(0xFF8FC79A)
 
 private const val TAG = "dfroot"
@@ -618,9 +620,13 @@ private fun BrowserScreen(activity: ComponentActivity, onPicked: (File) -> Unit)
                 item(key = "..") {
                     val up = parent.canRead()
                     Row(
-                        Modifier.fillMaxWidth().heightIn(min = 44.dp)
+                        Modifier.fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                            .heightIn(min = 44.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .border(1.dp, Outline, RoundedCornerShape(14.dp))
                             .clickable(enabled = up) { if (up) dir = parent }
-                            .padding(vertical = 6.dp, horizontal = 4.dp),
+                            .padding(vertical = 6.dp, horizontal = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("📁", fontSize = 14.sp, modifier = Modifier.width(24.dp))
@@ -634,11 +640,15 @@ private fun BrowserScreen(activity: ComponentActivity, onPicked: (File) -> Unit)
                 val isKo = !isDir && f.name.endsWith(".ko")
                 val readable = f.canRead()
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 44.dp)
+                    Modifier.fillMaxWidth()
+                        .padding(vertical = 2.dp)
+                        .heightIn(min = 44.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(1.dp, if (isKo) Yellow else Outline, RoundedCornerShape(14.dp))
                         .clickable(enabled = isDir || readable) {
                             if (isDir) dir = f else onPicked(f)
                         }
-                        .padding(vertical = 6.dp, horizontal = 4.dp),
+                        .padding(vertical = 6.dp, horizontal = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
