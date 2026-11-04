@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -80,7 +82,7 @@ private const val ABOUT = "DFRoot 4.7 · arm32 移植版\n\n" +
         "已在 Xiaomi Watch 2 Pro 验证。\n\n" +
         "致谢：lspromise、DFReroot、DirtyInit"
 
-private enum class Route { Home, Jailbreak, Managers, Ko, Output, Settings }
+private enum class Route { Home, Jailbreak, Managers, Ko, Browser, Output, Settings }
 
 /** Everything the screens need, hoisted out of composition so a run survives
  *  navigating away and back. */
@@ -92,6 +94,7 @@ private class AppState(val activity: ComponentActivity) {
     var running by mutableStateOf(false)
     var done by mutableStateOf(false)
     var message by mutableStateOf<String?>(null)
+    var koMessage by mutableStateOf<String?>(null)
 
     fun refresh() {
         managers = SuManagerInfo.load(activity)
@@ -193,7 +196,17 @@ fun DfRootApp(activity: ComponentActivity) {
                 state = state,
                 onPicked = { route = Route.Jailbreak })
 
-            Route.Ko -> KoScreen(activity)
+            Route.Ko -> KoScreen(
+                activity = activity,
+                message = state.koMessage,
+                onBrowser = { route = Route.Browser })
+
+            Route.Browser -> BrowserScreen(
+                activity = activity,
+                onPicked = { file ->
+                    state.koMessage = state.pickCustomKo(file)
+                    route = Route.Ko
+                })
 
             Route.Output -> OutputScreen()
             Route.Settings -> SettingsScreen(activity)
@@ -370,7 +383,7 @@ private fun ManagerScreen(state: AppState, onPicked: () -> Unit) {
 }
 
 @Composable
-private fun KoScreen(activity: ComponentActivity) {
+private fun KoScreen(activity: ComponentActivity, message: String?, onBrowser: () -> Unit) {
     val dataDir = activity.createDeviceProtectedStorageContext().filesDir.parentFile
     val extDir = activity.getExternalFilesDir(null)
     var info by remember { mutableStateOf<String?>(null) }
@@ -431,9 +444,11 @@ private fun KoScreen(activity: ComponentActivity) {
         }
 
         Spacer(Modifier.height(12.dp))
-        Pill(Grey, OnGrey, "📂", "从文件管理器选择…", "浏览设备上的任意 .ko", height = 60) {
+        Pill(Grey, OnGrey, "📂", "从文件管理器选择…", "系统选择器（部分表不支持）", height = 56) {
             picker.launch(arrayOf("*/*"))
         }
+        Spacer(Modifier.height(8.dp))
+        Pill(Grey, OnGrey, "🗂", "浏览本机目录…", "内置文件浏览器", height = 56, onClick = onBrowser)
 
         Spacer(Modifier.height(12.dp))
         Text("或从 files 目录选用：", color = OnGrey, fontSize = 12.sp)
@@ -462,9 +477,94 @@ private fun KoScreen(activity: ComponentActivity) {
             }
         }
 
-        info?.let {
+        (info ?: message)?.let {
             Spacer(Modifier.height(8.dp))
             Text(it, color = Good, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun BrowserScreen(activity: ComponentActivity, onPicked: (File) -> Unit) {
+    val starts = remember {
+        listOfNotNull(
+            activity.createDeviceProtectedStorageContext().filesDir.parentFile,
+            activity.getExternalFilesDir(null),
+            File("/sdcard/Android/data/df.root/files"),
+            File("/sdcard/Download"),
+            File("/sdcard"),
+            File("/")
+        ).distinctBy { it.absolutePath }
+    }
+    var dir by remember { mutableStateOf(starts.firstOrNull() ?: File("/")) }
+    var rows by remember { mutableStateOf<List<File>>(emptyList()) }
+    var err by remember { mutableStateOf<String?>(null) }
+    var tick by remember { mutableStateOf(0) }
+
+    LaunchedEffect(dir, tick) {
+        val (list, e) = withContext(Dispatchers.IO) {
+            val f = dir.listFiles()
+            if (f == null) Pair(emptyList<File>(), "无法读取（scoped storage 或权限不足）")
+            else Pair(f.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() })), null)
+        }
+        rows = list
+        err = e
+    }
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Text("选择 .ko", color = OnGrey, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text(dir.absolutePath, color = Inactive, fontSize = 9.sp,
+             fontFamily = FontFamily.Monospace, maxLines = 2)
+
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            starts.take(4).forEach { r ->
+                TextButton(onClick = { dir = r }) {
+                    Text(r.name.ifEmpty { "/" }, fontSize = 9.sp)
+                }
+            }
+        }
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            TextButton(onClick = {
+                dir.parentFile?.let { if (it.canRead()) dir = it }
+            }) { Text("上级", fontSize = 10.sp) }
+            TextButton(onClick = { tick++ }) { Text("刷新", fontSize = 10.sp) }
+        }
+
+        err?.let { Text(it, color = OnRed, fontSize = 9.sp) }
+
+        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+            items(rows, key = { it.absolutePath }) { f ->
+                val isDir = f.isDirectory
+                val isKo = f.name.endsWith(".ko")
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clickable(enabled = isDir || isKo) {
+                            if (isDir) dir = f else onPicked(f)
+                        }
+                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        when {
+                            isDir -> "📁"
+                            isKo -> "⬇"
+                            else -> "·"
+                        },
+                        fontSize = 13.sp, modifier = Modifier.width(22.dp)
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            f.name + if (isDir) "/" else "",
+                            color = if (isDir || isKo) OnGrey else Inactive,
+                            fontSize = 12.sp, maxLines = 1
+                        )
+                        if (isKo) Text(describeElf(f), color = Inactive, fontSize = 9.sp,
+                                       fontFamily = FontFamily.Monospace)
+                    }
+                }
+            }
         }
     }
 }
