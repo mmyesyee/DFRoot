@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -66,6 +67,8 @@ private val OnGrey = Color(0xFFE6E1E5)
 private val Inactive = Color(0xFF5A5A5A)
 private val Good = Color(0xFF8FC79A)
 
+private const val TAG = "dfroot"
+
 private const val ABOUT = "DFRoot 4.7 · arm32 移植版\n\n" +
         "利用内核页缓存写原语（CVE-2026-43284）加载自定义内核模块，" +
         "不需要解锁 bootloader。\n\n" +
@@ -111,7 +114,12 @@ private class AppState(val activity: ComponentActivity) {
             val rc = try {
                 withContext(Dispatchers.IO) {
                     ExploitRunner.run(deCtx, object : IReporter {
-                        override fun report(msg: String) = OutputLog.append(msg)
+                        /* both: the output page reads OutputLog, adb logcat reads
+                         * the tag - losing one of them makes debugging blind */
+                        override fun report(msg: String) {
+                            Log.i(TAG, msg.trim())
+                            OutputLog.append(msg)
+                        }
                     })
                 }
             } catch (t: Throwable) {
@@ -120,6 +128,8 @@ private class AppState(val activity: ComponentActivity) {
             }
             running = false
             if (rc == 0) done = true
+            if (OutputLog.get().isEmpty())
+                OutputLog.append("no output from the exploit (rc=$rc)\n")
             message = when (rc) {
                 0 -> "SUCCESS"
                 1 -> "ksud 非零退出"
