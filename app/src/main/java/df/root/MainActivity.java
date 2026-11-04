@@ -1,5 +1,6 @@
 package df.root;
 
+import android.app.ActionBar;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
@@ -59,7 +60,12 @@ public class MainActivity extends Activity implements IReporter {
         mDeCtx = createDeviceProtectedStorageContext();
         setContentView(R.layout.activity_main);
 
-        getActionBar().setSubtitle("@diabl0w github/xda");
+        // Theme.DirtyFrag is derived from Theme.Material.Light, which has no
+        // action bar, so getActionBar() is null on some devices (Wear OS in
+        // particular). Don't take the whole activity down over a subtitle.
+        ActionBar actionBar = getActionBar();
+        if (actionBar != null)
+            actionBar.setSubtitle("@diabl0w github/xda");
 
         btnRun = findViewById(R.id.btnRun);
         outputScroll = findViewById(R.id.outputScroll);

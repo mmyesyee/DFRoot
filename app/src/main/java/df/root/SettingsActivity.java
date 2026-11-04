@@ -10,7 +10,10 @@ public class SettingsActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_settings);
-        getActionBar().setDisplayHomeAsUpEnabled(true);
+        // See MainActivity: the theme has no action bar on every device.
+        android.app.ActionBar actionBar = getActionBar();
+        if (actionBar != null)
+            actionBar.setDisplayHomeAsUpEnabled(true);
 
         getFragmentManager().beginTransaction()
                 .replace(R.id.settingsContainer, new SettingsFragment())
