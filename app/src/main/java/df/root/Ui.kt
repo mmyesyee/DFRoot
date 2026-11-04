@@ -177,8 +177,6 @@ private fun HomePage(state: AppState, onJailbreak: () -> Unit, onOutput: () -> U
     ) {
         Text("主页", color = OnGrey, fontSize = 17.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(10.dp))
-        InfoCard(state)
-        Spacer(Modifier.height(10.dp))
         Pill(
             bg = if (state.done) Blue else Red,
             fg = if (state.done) OnBlue else OnRed,
@@ -187,6 +185,8 @@ private fun HomePage(state: AppState, onJailbreak: () -> Unit, onOutput: () -> U
             subtitle = if (state.done) "重启后失效" else "选择管理器并开始",
             onClick = onJailbreak
         )
+        Spacer(Modifier.height(10.dp))
+        InfoCard(state)
         Spacer(Modifier.height(10.dp))
         Pill(Grey, OnGrey, "☰", "输出", "查看完整日志", height = 60, onClick = onOutput)
     }
