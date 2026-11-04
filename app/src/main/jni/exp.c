@@ -977,6 +977,7 @@ static int exploit(void) {
         { "/dev/dfk0",  "shellcode: finit_module loaded the app copy",       -1 },
         { "/dev/dfk1",  "shellcode: finit_module refused, fell back to insmod", -1 },
         { "/dev/dfku0", "bootstrap: kernelsu.ko loaded",                     -1 },
+        { "/dev/dfku1", "bootstrap: dfroot.ko loaded again (loader is sound)", -1 },
         { "/dev/dfw5",  "shellcode: BOTH insmod paths failed",                1 },
         { "/dev/dfm0",  "kernel module: launching bootstrap",               -1 },
         { "/dev/dfm1",  "bootstrap: loading app preferences file",          -1 },

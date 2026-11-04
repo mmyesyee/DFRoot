@@ -312,8 +312,14 @@ int main(void)
     if (run_ctx(NULL, (char *[]){ KSUD_STAGE, "late-load", "--package-name", su_manager, NULL }) == 0) {
         dump_diagnostics(su_manager);
 
-        /* The manager's own kernel module first, then anything the user drops
-         * in as custom.ko - same loader for both. */
+        /* Control experiment first: dfroot.ko unloads itself right after init
+         * (it returns -ENODEV), so this copy is not in the kernel any more and
+         * loading it again must succeed if the loader itself is sound. */
+        if (load_module_file("dfroot.ko", "/data/user_de/0/df.root/ko") == 0)
+            touch("/dev/dfku1");
+
+        /* The manager's own module, then anything dropped in as custom.ko -
+         * the same loader for all of them. */
         if (load_module_file("kernelsu.ko", "/data/user_de/0/df.root/kernelsu.ko") == 0)
             touch("/dev/dfku0");
         load_module_file("custom.ko", "/data/user_de/0/df.root/custom.ko");
