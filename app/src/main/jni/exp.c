@@ -862,6 +862,20 @@ static int hex_to_bytes(const char *hex, uint8_t *out, size_t len) {
     return 0;
 }
 
+/* bootstrap runs as root and dumps everything we cannot see into the app's own
+ * directory. */
+static void dump_diag_file(void)
+{
+    int fd = open("/data/user_de/0/df.root/diag.txt", O_RDONLY);
+    if (fd < 0) { printf("diag: not available (%s)\n", strerror(errno)); return; }
+    char b[4097];
+    ssize_t n = read(fd, b, sizeof(b) - 1);
+    close(fd);
+    if (n <= 0) { printf("diag: empty\n"); return; }
+    b[n] = '\0';
+    printf("---- diag ----\n%s\n--------------\n", b);
+}
+
 /* The payload redirects insmod's stdout/stderr into /dev/dfilog; on timeout
  * that is the only place the reason ends up (dmesg is root-only on android 14). */
 static void dump_insmod_log(void)
@@ -994,8 +1008,10 @@ static int exploit(void) {
         }
     }
     dump_insmod_log();
+    dump_diag_file();
     printf("timeout: ERROR - check logcat & dmesg\n");
 done:
+    if (rc == 0) dump_diag_file();
     if (rc == 3) printf("patch: ERROR - failed to patch files\n");
     return rc;
 }

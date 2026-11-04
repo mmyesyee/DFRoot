@@ -13,6 +13,7 @@
 #define KSUD       "/data/adb/ksud"
 #define PREFS_PATH "/data/user_de/0/df.root/shared_prefs/dfroot.xml"
 #define MODULES_DIR "/data/adb/modules"
+#define DIAG_PATH  "/data/user_de/0/df.root/diag.txt"
 
 static int pref_true(const char *buf, const char *key)
 {
@@ -176,6 +177,20 @@ static void restart_adbd_as_root(void)
     run_ctx(NULL, (char *[]){ "/system/bin/setprop", "ctl.restart", "adbd", NULL });
 }
 
+/* We run as root here, but the app (and adb shell) cannot read /data/adb or
+ * dmesg, so dump everything we can see into a file the app owns. */
+static void dump_diagnostics(void)
+{
+    char cmd[768];
+    snprintf(cmd, sizeof(cmd),
+             "{ echo '=== /data/adb ==='; ls -l /data/adb; "
+             "echo '=== /proc/modules (ksu/dfroot) ==='; cat /proc/modules | grep -iE 'ksu|dfroot'; "
+             "echo '=== processes ==='; ps -A | grep -iE 'ksu|dfroot'; "
+             "echo '=== dmesg ==='; dmesg | grep -iE 'ksu|kernelsu|dfroot|avc' | tail -40; "
+             "} > %s 2>&1", DIAG_PATH);
+    run_ctx(NULL, (char *[]){ "/system/bin/sh", "-c", cmd, NULL });
+}
+
 static void touch(const char *path)
 {
     int fd = open(path, O_CREAT | O_WRONLY, 0666);
@@ -231,6 +246,7 @@ int main(void)
 
     touch("/dev/dfm5");    
     if (run_ctx(NULL, (char *[]){ KSUD_STAGE, "late-load", "--package-name", su_manager, NULL }) == 0) {
+        dump_diagnostics();
         touch("/dev/dfm6");
         if (adb_root) {
             restart_adbd_as_root();
@@ -241,6 +257,7 @@ int main(void)
             run_ctx("u:r:ksu:s0", (char *[]){ KSUD, "soft-reboot", NULL });
         }
     } else {
+        dump_diagnostics();
         touch("/dev/dfme2");
     }
         
