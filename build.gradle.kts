@@ -1,6 +1,8 @@
-// AGP 9 compiles Kotlin itself (built-in Kotlin), so the Kotlin Android Gradle
-// plugin must NOT be applied here: it tries to register a second 'kotlin'
-// extension and fails with "Cannot add extension with name 'kotlin'".
+// AGP 9 compiles Kotlin itself (built-in Kotlin 2.2.10) and registers the
+// 'kotlin' extension, so org.jetbrains.kotlin.android must NOT be applied.
+// Compose still needs its compiler plugin, and that plugin has to match the
+// bundled Kotlin exactly.
 plugins {
     id("com.android.application") version "9.4.0" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "2.2.10" apply false
 }
