@@ -106,6 +106,7 @@ private class AppState(val activity: ComponentActivity) {
 
     fun start(scope: CoroutineScope) {
         val index = selected
+        Log.i(TAG, "start() selected=$index count=${managers.size} running=$running")
         if (running || index !in managers.indices) return
         running = true
         message = null
@@ -146,7 +147,10 @@ fun DfRootApp(activity: ComponentActivity) {
     val state = remember { AppState(activity) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(route) { state.refresh() }
+    LaunchedEffect(route) {
+        state.refresh()
+        Log.i(TAG, "route=$route managers=${state.managers.size} selected=${state.selected} done=${state.done}")
+    }
     BackHandler(enabled = route != Route.Home) {
         route = if (route == Route.Managers) Route.Jailbreak else Route.Home
     }
