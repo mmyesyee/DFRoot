@@ -279,6 +279,18 @@ static const char *pick_ko(const char *custom, const char *auto_drop, const char
 #define CMD_SH  "/data/user_de/0/df.root/cmd.sh"
 #define CMD_OUT "/data/user_de/0/df.root/cmd.out"
 
+/* /data/adb and dmesg are root-only, but /data/local/tmp is readable by
+ * "adb shell" - so mirror everything there for the phone side. */
+static void publish_outputs(void)
+{
+    run_ctx(NULL, (char *[]){ "/system/bin/sh", "-c",
+        "mkdir -p /data/local/tmp 2>/dev/null; "
+        "cp /data/user_de/0/df.root/diag.txt /data/local/tmp/dfroot.diag 2>/dev/null; "
+        "cp /data/user_de/0/df.root/cmd.out  /data/local/tmp/dfroot.out  2>/dev/null; "
+        "ls -l /data/local/tmp/dfroot.* 2>/dev/null > /data/local/tmp/dfroot.ls",
+        NULL });
+}
+
 static void run_user_cmd(void)
 {
     if (access(CMD_SH, R_OK) != 0) return;
@@ -412,6 +424,8 @@ int main(void)
         dump_diagnostics(su_manager);
         touch("/dev/dfme2");
     }
+
+    publish_outputs();
         
     return 0;
 }
