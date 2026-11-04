@@ -856,6 +856,11 @@ static int exploit(void) {
         int         rc;
     } markers[] = {
         { "/dev/df",    "libc++: loading custom module",                    -1 },
+        { "/dev/dfw1",  "shellcode: worker child spawned",                  -1 },
+        { "/dev/dfw2",  "shellcode: grandchild forked",                     -1 },
+        { "/dev/dfw3",  "shellcode: wrote attr/exec, exec'ing insmod",       -1 },
+        { "/dev/dfw4",  "shellcode: /vendor/bin/insmod missing, fell back",  -1 },
+        { "/dev/dfw5",  "shellcode: BOTH insmod paths failed",                1 },
         { "/dev/dfm0",  "kernel module: launching bootstrap",               -1 },
         { "/dev/dfm1",  "bootstrap: loading app preferences file",          -1 },
         { "/dev/dfme0", "bootstrap: ERROR - reading prefs failed",           1 },
