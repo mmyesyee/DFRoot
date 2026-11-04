@@ -1,14 +1,9 @@
 <resources>
-    <!-- Material 3, dark only: this app targets a watch with an OLED panel. -->
-    <style name="Theme.DirtyFrag" parent="Theme.Material3.Dark.NoActionBar">
+    <!-- Pure Compose UI: the platform theme only has to give us a black window. -->
+    <style name="Theme.DirtyFrag" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@android:color/black</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="colorPrimary">#8FC79A</item>
-        <item name="colorOnPrimary">#00391F</item>
-        <item name="colorSurface">#000000</item>
-        <item name="colorOnSurface">#E6E1E5</item>
         <item name="android:colorBackground">@android:color/black</item>
-        <item name="preferenceTheme">@style/PreferenceThemeOverlay</item>
     </style>
 </resources>
