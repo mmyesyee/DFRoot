@@ -4,6 +4,16 @@ enable_language(ASM)
 
 set(JNI_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
+# The hijacked function lives in libc++.so of the target userspace, so the
+# payload has to be written in that ISA — not in the app's ABI.
+if(ANDROID_ABI STREQUAL "armeabi-v7a")
+    set(SHELLCODE_ASM   "${JNI_DIR}/libcxx32.S")
+    set(MAX_PAGE_SIZE   4096)
+else()
+    set(SHELLCODE_ASM   "${JNI_DIR}/libcxx.S")
+    set(MAX_PAGE_SIZE   16384)
+endif()
+
 set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -I${JNI_DIR}")
 set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS} ${C_FLAGS} -I${JNI_DIR} -Wall -Wextra -fno-stack-protector -fomit-frame-pointer")
 
@@ -15,6 +25,7 @@ add_custom_command(
             --sysroot=${CMAKE_SYSROOT}
             "${JNI_DIR}/splicehelper.c"
             -o "${SPLICEHELPER}"
+            -O2 -fomit-frame-pointer
             -nodefaultlibs -nostartfiles -ffreestanding -static
     COMMAND "${CMAKE_STRIP}" "${SPLICEHELPER}"
     DEPENDS "${JNI_DIR}/splicehelper.c"
@@ -36,7 +47,7 @@ set(KO_FILES
 # AGP only packages lib*.so, so the executable is named libdfroot.so and lands
 # in the APK's native lib dir. The app execs it from nativeLibraryDir, which is
 # executable (app data dir is not).
-add_executable(dfroot exp.c libcxx.S elf_parser.c)
+add_executable(dfroot exp.c ${SHELLCODE_ASM} elf_parser.c)
 add_dependencies(dfroot splicehelper_bin)
 set_target_properties(dfroot PROPERTIES
     PREFIX "lib"
@@ -47,11 +58,11 @@ set_source_files_properties(exp.c PROPERTIES
     OBJECT_DEPENDS "${KO_FILES};${SPLICEHELPER}")
 
 target_link_libraries(dfroot log)
-target_link_options(dfroot PRIVATE -Wl,-z,max-page-size=16384)
+target_link_options(dfroot PRIVATE -Wl,-z,max-page-size=${MAX_PAGE_SIZE})
 
 add_executable(bootstrap bootstrap.c)
 set_target_properties(bootstrap PROPERTIES
     PREFIX "lib"
     SUFFIX ".so"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
-target_link_options(bootstrap PRIVATE -Wl,-z,max-page-size=16384)
+target_link_options(bootstrap PRIVATE -Wl,-z,max-page-size=${MAX_PAGE_SIZE})

