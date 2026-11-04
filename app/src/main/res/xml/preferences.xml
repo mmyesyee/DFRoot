@@ -13,6 +13,12 @@
         android:defaultValue="false" />
 
     <SwitchPreference
+        android:key="adb_root"
+        android:title="Restart adbd as root"
+        android:summary="After a successful run, restart adbd so that 'adb shell' runs as uid 0. This drops the current adb session."
+        android:defaultValue="false" />
+
+    <SwitchPreference
         android:key="disable_modules"
         android:title="Disable KSU Modules"
         android:summary="Turn this on if a broken module is crashing your device. The next run will launch with all modules disabled."

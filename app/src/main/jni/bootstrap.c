@@ -26,7 +26,7 @@ static int pref_true(const char *buf, const char *key)
 }
 
 static int read_prefs(char *su_manager, size_t su_manager_size, int *soft_reboot,
-                      int *disable_modules)
+                      int *disable_modules, int *adb_root)
 {
     int fd = open(PREFS_PATH, O_RDONLY);
     if (fd < 0) return -1;
@@ -49,6 +49,7 @@ static int read_prefs(char *su_manager, size_t su_manager_size, int *soft_reboot
 
     *soft_reboot = pref_true(buf, "soft_reboot");
     *disable_modules = pref_true(buf, "disable_modules");
+    *adb_root = pref_true(buf, "adb_root");
 
     return 0;
 }
@@ -166,6 +167,15 @@ static int run_ctx(const char *ctx, char *const argv[])
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
+/* Make adbd run as uid 0 so that "adb shell" is root. adbd restarts itself
+ * when service.adb.root flips; ctl.restart covers the case where it does not.
+ * The current adb session drops, which is expected. */
+static void restart_adbd_as_root(void)
+{
+    run_ctx(NULL, (char *[]){ "/system/bin/setprop", "service.adb.root", "1", NULL });
+    run_ctx(NULL, (char *[]){ "/system/bin/setprop", "ctl.restart", "adbd", NULL });
+}
+
 static void touch(const char *path)
 {
     int fd = open(path, O_CREAT | O_WRONLY, 0666);
@@ -197,8 +207,8 @@ int main(void)
 {
     touch("/dev/dfm1");
     char su_manager[256];
-    int soft_reboot, disable_mods;
-    if (read_prefs(su_manager, sizeof(su_manager), &soft_reboot, &disable_mods) != 0) {
+    int soft_reboot, disable_mods, adb_root;
+    if (read_prefs(su_manager, sizeof(su_manager), &soft_reboot, &disable_mods, &adb_root) != 0) {
         touch("/dev/dfme0");
         return 1;
     }
@@ -222,6 +232,10 @@ int main(void)
     touch("/dev/dfm5");    
     if (run_ctx(NULL, (char *[]){ KSUD_STAGE, "late-load", "--package-name", su_manager, NULL }) == 0) {
         touch("/dev/dfm6");
+        if (adb_root) {
+            restart_adbd_as_root();
+            touch("/dev/dfm7");
+        }
         if (soft_reboot) {
             while (late_load_running()) sleep(1);
             run_ctx("u:r:ksu:s0", (char *[]){ KSUD, "soft-reboot", NULL });

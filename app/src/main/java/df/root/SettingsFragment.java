@@ -40,6 +40,14 @@ public class SettingsFragment extends PreferenceFragment {
             return true;
         });
 
+        SwitchPreference adbRootPref = (SwitchPreference) findPreference("adb_root");
+        adbRootPref.setPersistent(false);
+        adbRootPref.setChecked(dePrefs.getBoolean("adb_root", false));
+        adbRootPref.setOnPreferenceChangeListener((pref, value) -> {
+            dePrefs.edit().putBoolean("adb_root", (Boolean) value).apply();
+            return true;
+        });
+
         SwitchPreference disableModulesPref = (SwitchPreference) findPreference("disable_modules");
         disableModulesPref.setPersistent(false);
         disableModulesPref.setChecked(dePrefs.getBoolean("disable_modules", false));
