@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
+#include <sys/utsname.h>
 #include <errno.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -190,6 +191,44 @@ static void append_diag(const char *line)
     close(fd);
 }
 
+/* Pull "vermagic=..." out of a .ko and log it next to the running release, so a
+ * mismatch is visible without the kernel log. */
+static void diag_ko_info(const char *tag, const char *path)
+{
+    char line[512];
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return;
+
+    static char buf[512 * 1024];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0) return;
+    buf[n] = '\0';
+
+    struct utsname u;
+    const char *rel = (uname(&u) == 0) ? u.release : "?";
+    snprintf(line, sizeof(line), "%s: kernel %s\n", tag, rel);
+    append_diag(line);
+
+    char *v = memmem(buf, (size_t)n, "vermagic=", 9);
+    if (v) {
+        v += 9;
+        size_t len = strnlen(v, 128);
+        snprintf(line, sizeof(line), "%s: vermagic=%.*s\n", tag, (int)len, v);
+    } else {
+        snprintf(line, sizeof(line), "%s: vermagic not found (not a module?)\n", tag);
+    }
+    append_diag(line);
+
+    char *nm = memmem(buf, (size_t)n, "name=", 5);
+    if (nm) {
+        nm += 5;
+        size_t len = strnlen(nm, 64);
+        snprintf(line, sizeof(line), "%s: modname=%.*s\n", tag, (int)len, nm);
+        append_diag(line);
+    }
+}
+
 /* Load one kernel module, whoever it belongs to: try finit_module straight from
  * here (we are root), then fall back to "ksud insmod", which loads with
  * kallsyms access. Both paths are reported. */
@@ -204,6 +243,7 @@ static int load_module_file(const char *tag, const char *path)
 
     snprintf(line, sizeof(line), "%s: using %s\n", tag, path);
     append_diag(line);
+    diag_ko_info(tag, path);
 
     int fd = open(path, O_RDONLY);
     long rc = -1;
@@ -257,7 +297,8 @@ static void dump_diagnostics(const char *su_manager)
              "echo '=== modules with ksu now? ==='; cat /proc/modules | grep -i ksu; echo rc=$?; "
              "echo '=== /proc/modules ==='; cat /proc/modules; "
              "echo '=== processes ==='; ps -A | grep -iE 'ksu|dfroot'; "
-             "echo '=== dmesg ==='; dmesg | grep -iE 'ksu|kernelsu|module|avc' | tail -40; "
+             "echo '=== dmesg (unfiltered tail) ==='; dmesg | tail -40; "
+             "echo '=== dmesg (ksu/module) ==='; dmesg | grep -iE 'ksu|kernelsu|module|avc' | tail -40; "
              "} > %s 2>&1",
              KSUD_STAGE, KSUD_STAGE, KSUD_STAGE, su_manager,
              KSUD_STAGE, su_manager, KSUD_STAGE, su_manager,
