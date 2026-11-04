@@ -50,3 +50,4 @@
     .equ SYS_exit_group,      248
     .equ SYS_openat,          322
     .equ SYS_splice,          340
+    .equ SYS_finit_module,    379

