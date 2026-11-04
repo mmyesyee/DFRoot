@@ -3,10 +3,13 @@ package df.root
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -372,6 +375,25 @@ private fun KoScreen(activity: ComponentActivity) {
     val extDir = activity.getExternalFilesDir(null)
     var info by remember { mutableStateOf<String?>(null) }
     var refresh by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            info = try {
+                val dst = File(dataDir, "custom.ko")
+                withContext(Dispatchers.IO) {
+                    activity.contentResolver.openInputStream(uri).use { input ->
+                        requireNotNull(input) { "openInputStream 返回 null" }
+                        dst.outputStream().use { out -> input.copyTo(out) }
+                    }
+                }
+                refresh++
+                "已选用 ${dst.length()} 字节 · ${elfArch(dst)}，下次越狱时加载"
+            } catch (t: Throwable) {
+                "复制失败: ${t.message}"
+            }
+        }
+    }
 
     val staged = remember(refresh) {
         listOf(
@@ -409,7 +431,12 @@ private fun KoScreen(activity: ComponentActivity) {
         }
 
         Spacer(Modifier.height(12.dp))
-        Text("可从 files 目录选用：", color = OnGrey, fontSize = 12.sp)
+        Pill(Grey, OnGrey, "📂", "从文件管理器选择…", "浏览设备上的任意 .ko", height = 60) {
+            picker.launch(arrayOf("*/*"))
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Text("或从 files 目录选用：", color = OnGrey, fontSize = 12.sp)
         Spacer(Modifier.height(4.dp))
 
         if (offered.isEmpty()) {
@@ -442,22 +469,25 @@ private fun KoScreen(activity: ComponentActivity) {
     }
 }
 
-private fun describeElf(f: File): String {
-    if (!f.exists()) return "不存在"
+private fun elfArch(f: File): String {
     val head = ByteArray(20)
     val n = try {
         FileInputStream(f).use { it.read(head) }
     } catch (t: Throwable) {
         -1
     }
-    if (n != head.size) return "${f.length()} 字节"
+    if (n != head.size) return "未知架构"
     val machine = (head[18].toInt() and 0xff) or ((head[19].toInt() and 0xff) shl 8)
-    val arch = when (machine) {
+    return when (machine) {
         183 -> "aarch64"
         40 -> "arm32"
         else -> "machine=$machine"
     }
-    return "${f.length()} 字节 · $arch"
+}
+
+private fun describeElf(f: File): String {
+    if (!f.exists()) return "不存在"
+    return "${f.length()} 字节 · ${elfArch(f)}"
 }
 
 @Composable
