@@ -226,6 +226,13 @@ static int load_module_file(const char *tag, const char *path)
     return krc;
 }
 
+static const char *pick_ko(const char *custom, const char *auto_drop, const char *def)
+{
+    if (access(custom, R_OK) == 0) return custom;      /* chosen in the app  */
+    if (access(auto_drop, R_OK) == 0) return auto_drop; /* dropped in files/  */
+    return def;                                         /* built in / extracted */
+}
+
 static void dump_diagnostics(const char *su_manager)
 {
     char cmd[1400];
@@ -321,12 +328,12 @@ int main(void)
          * dfroot.ko returns -ENODEV from init so the kernel drops it immediately;
          * loading our copy again is therefore also a control experiment for the
          * loader itself. */
-        const char *df_ko = access("/data/user_de/0/df.root/dfroot_custom.ko", R_OK) == 0
-                          ? "/data/user_de/0/df.root/dfroot_custom.ko"
-                          : "/data/user_de/0/df.root/ko";
-        const char *ksu_ko = access("/data/user_de/0/df.root/kernelsu_custom.ko", R_OK) == 0
-                          ? "/data/user_de/0/df.root/kernelsu_custom.ko"
-                          : "/data/user_de/0/df.root/kernelsu.ko";
+        const char *df_ko = pick_ko("/data/user_de/0/df.root/dfroot_custom.ko",
+                                    "/data/user_de/0/df.root/dfroot_auto.ko",
+                                    "/data/user_de/0/df.root/ko");
+        const char *ksu_ko = pick_ko("/data/user_de/0/df.root/kernelsu_custom.ko",
+                                     "/data/user_de/0/df.root/kernelsu_auto.ko",
+                                     "/data/user_de/0/df.root/kernelsu.ko");
 
         if (load_module_file("dfroot.ko", df_ko) == 0)
             touch("/dev/dfku1");

@@ -85,9 +85,31 @@ private const val ABOUT = "DFRoot 4.7 · arm32 移植版\n\n" +
         "已在 Xiaomi Watch 2 Pro 验证。\n\n" +
         "致谢：lspromise、DFReroot、DirtyInit"
 
-private enum class KoSlot(val label: String, val file: String, val override: String, val note: String) {
-    Dfroot("dfroot.ko", "ko", "dfroot_custom.ko", "越狱用的内核模块 · APK 内置，按 KMI 选"),
-    Kernelsu("kernelsu.ko", "kernelsu.ko", "kernelsu_custom.ko", "管理器的内核模块 · 从管理器 APK 抽取"),
+private enum class KoSlot(
+    val label: String,
+    val file: String,
+    val override: String,
+    val auto: String,
+    val note: String,
+) {
+    Dfroot("dfroot.ko", "ko", "dfroot_custom.ko", "dfroot_auto.ko",
+           "越狱用的内核模块 · APK 内置，按 KMI 选"),
+    Kernelsu("kernelsu.ko", "kernelsu.ko", "kernelsu_custom.ko", "kernelsu_auto.ko",
+             "管理器的内核模块 · 从管理器 APK 抽取"),
+}
+
+/** custom (picked in the app) > dropped in files/ > default */
+private fun effectiveKo(dataDir: File?, extDir: File?, slot: KoSlot): Triple<File, String, File?> {
+    val custom = File(dataDir, slot.override)
+    if (custom.exists()) return Triple(custom, "自定义", custom)
+
+    val dropped = extDir?.let { File(it, slot.label) }
+    if (dropped != null && dropped.exists()) return Triple(dropped, "自动(files)", dropped)
+
+    val auto = File(dataDir, slot.auto)
+    if (auto.exists()) return Triple(auto, "自动(files)", auto)
+
+    return Triple(File(dataDir, slot.file), "默认", null)
 }
 
 private enum class Route { Home, Jailbreak, Managers, Ko, KoDfroot, KoKernelsu, Browser, Output, Settings }
@@ -421,6 +443,7 @@ private fun ManagerScreen(state: AppState, onPicked: () -> Unit) {
 @Composable
 private fun KoMenuScreen(activity: ComponentActivity, onSlot: (KoSlot) -> Unit) {
     val dataDir = activity.createDeviceProtectedStorageContext().filesDir.parentFile
+    val extDir = activity.getExternalFilesDir(null)
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState())
             .padding(horizontal = 10.dp, vertical = 6.dp),
@@ -428,19 +451,18 @@ private fun KoMenuScreen(activity: ComponentActivity, onSlot: (KoSlot) -> Unit) 
     ) {
         Text("内核模块", color = OnGrey, fontSize = 17.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(4.dp))
-        Text("不选自定义就用默认", color = Inactive, fontSize = 10.sp)
+        Text("files/ 里放同名文件即自动生效", color = Inactive, fontSize = 10.sp)
         Spacer(Modifier.height(10.dp))
 
         KoSlot.entries.forEach { slot ->
-            val ovr = File(dataDir, slot.override)
-            val def = File(dataDir, slot.file)
-            val custom = ovr.exists()
+            val (eff, src, _) = effectiveKo(dataDir, extDir, slot)
+            val local = src != "默认"
             Pill(
-                bg = if (custom) Yellow else Grey,
-                fg = if (custom) OnYellow else OnGrey,
-                glyph = if (custom) "✦" else "⚙",
+                bg = if (local) Yellow else Grey,
+                fg = if (local) OnYellow else OnGrey,
+                glyph = if (local) "✦" else "⚙",
                 title = slot.label,
-                subtitle = if (custom) "自定义 · ${describeElf(ovr)}" else "默认 · ${describeElf(def)}",
+                subtitle = "$src · ${describeElf(eff)}",
                 onClick = { onSlot(slot) }
             )
             Spacer(Modifier.height(10.dp))
@@ -458,8 +480,11 @@ private fun KoSlotScreen(
     val dataDir = activity.createDeviceProtectedStorageContext().filesDir.parentFile
     val def = File(dataDir, slot.file)
     val ovr = File(dataDir, slot.override)
+    val autoF = File(dataDir, slot.auto)
     var info by remember { mutableStateOf<String?>(null) }
     var custom by remember { mutableStateOf(ovr.exists()) }
+    val dropped = activity.getExternalFilesDir(null)?.let { File(it, slot.label) }
+    var autoOn by remember { mutableStateOf(autoF.exists() || (dropped?.exists() == true)) }
     val scope = rememberCoroutineScope()
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -489,24 +514,36 @@ private fun KoSlotScreen(
         Text(slot.note, color = Inactive, fontSize = 10.sp)
         Spacer(Modifier.height(10.dp))
 
-        KoRow(if (custom) "当前：自定义" else "当前：默认",
-              if (custom) ovr.absolutePath else def.absolutePath,
-              describeElf(if (custom) ovr else def))
+        val src = when {
+            custom -> "自定义"
+            autoOn -> "自动(files)"
+            else -> "默认"
+        }
+        val eff = when {
+            custom -> ovr
+            autoOn -> autoF
+            else -> def
+        }
+        KoRow("当前：$src", eff.absolutePath, describeElf(eff))
         Spacer(Modifier.height(8.dp))
 
         KoRow("默认文件", def.absolutePath, describeElf(def))
+        if (autoOn) {
+            Spacer(Modifier.height(8.dp))
+            KoRow("自动（files 目录）", autoF.absolutePath, describeElf(autoF))
+        }
         if (custom) {
             Spacer(Modifier.height(8.dp))
             KoRow("自定义覆盖", ovr.absolutePath, describeElf(ovr))
             Spacer(Modifier.height(8.dp))
             TextButton(onClick = {
                 info = try {
-                    if (ovr.delete() || !ovr.exists()) { custom = ovr.exists(); "已恢复默认" }
+                    if (ovr.delete() || !ovr.exists()) { custom = ovr.exists(); "已移除自定义" }
                     else "删除失败"
                 } catch (t: Throwable) {
                     "删除失败: ${t.message}"
                 }
-            }) { Text("恢复默认") }
+            }) { Text("移除自定义") }
         }
 
         Spacer(Modifier.height(10.dp))
