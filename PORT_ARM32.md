@@ -88,6 +88,49 @@ files are well under 2 GB).
 | full arm32 link of `libdfroot.so` (`exp.c`+`libcxx32.S`+`elf_parser.c`) | ok, `Machine: ARM`, `ELF32` |
 | aarch64 objects still compile | ok (unchanged behaviour) |
 
+## Verified on hardware
+
+Xiaomi Watch 2 Pro, Wear OS / Android 14, kernel `5.15.167-android14-11-maybe-dirty`,
+`uname -m` = `armv8l`, `abilist` = `armeabi-v7a,armeabi` (aarch64 kernel, pure
+32-bit userspace). Full chain:
+
+```
+patch: /apex/.../crash_dump32 <- splicehelper (1312)  verify OK
+patch: /vendor/lib/libbinderdebug.so <- dfroot.ko (13392)  verify OK
+advanced 12 bytes to the first 32-bit Thumb insn at 0x46542
+Found: hook=0x46542 shellcode=0x66b90 len=608 (thumb)
+patch: /system/lib/libc++.so <- shellcode (608) + trampoline (16)  verify OK
+=== init ===
+shellcode: worker child spawned / grandchild forked / exec'ing insmod
+kernel module: launching bootstrap
+bootstrap: starting SU daemon
+ksud start: SUCCESS
+```
+
+Cleanup restored both patches, and every 16-byte write was verified by reading
+the content back.
+
+### The four bugs that only show up on 32-bit
+
+1. **`off_t` is 4 bytes, `loff_t*` is 8.** `splice(fd, &off, ...)` made the
+   kernel read stack garbage as the high half of the file offset → `EINVAL` at
+   block 0. Fixed with `off64_t` everywhere and `off_arg_t` = 8 bytes in the
+   bridge. (arm64 never noticed: `off_t` is already 64-bit there.)
+2. **`clone(CLONE_VFORK|CLONE_VM)` shares the parent's stack.** On arm32 the
+   bridge child trampled the caller's frame and the offset handed to the next
+   call came back as `0x102c2a6a`. Replaced with `fork()`.
+3. **The patched page cache is not dirty.** The ESP decrypt writes through
+   kmap, so nobody marks the page; the kernel reclaimed it after ~74 blocks and
+   re-read the stock `crash_dump32` from disk (`e_type=3`). Fixed by holding a
+   read-only mapping of the page and by checking + re-patching if it reverts.
+   Note: pinning through a *pipe* (splice 1 byte) makes the page a spliceable
+   pipe page, and the primitive then writes into it - that SEGV'd the bridge.
+4. **16-bit Thumb hook sites.** `sentry::sentry()` starts with
+   `push {r4, lr}` (0xb510); a 4-byte `B.W` cannot steal a 2-byte instruction.
+   The parser walks forward to the first 32-bit Thumb-2 instruction instead, and
+   the payload saves/restores APSR because a mid-function hook site may depend
+   on flags set earlier.
+
 ## Still needs the device
 
 1. `B.W` range: ±16 MB from the hook site to the shellcode slot. The tail-page
