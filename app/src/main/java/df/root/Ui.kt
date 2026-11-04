@@ -134,7 +134,15 @@ fun DfRootApp(activity: ComponentActivity) {
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(route) { state.refresh() }
-    BackHandler(enabled = route != Route.Home) { route = Route.Home }
+    BackHandler(enabled = route != Route.Home) {
+        route = if (route == Route.Managers) Route.Jailbreak else Route.Home
+    }
+
+    /* once it is rooted there is nothing to do on the jailbreak pages */
+    LaunchedEffect(state.done) {
+        if (state.done && (route == Route.Jailbreak || route == Route.Managers))
+            route = Route.Home
+    }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         when (route) {
@@ -190,9 +198,11 @@ private fun HomePage(state: AppState, onJailbreak: () -> Unit, onOutput: () -> U
         Pill(
             bg = if (state.done) Blue else Red,
             fg = if (state.done) OnBlue else OnRed,
-            glyph = "⚡",
+            glyph = if (state.done) "✓" else "⚡",
             title = if (state.done) "越狱完成" else "点击越狱",
-            subtitle = if (state.done) "重启后失效" else "选择管理器并开始",
+            subtitle = if (state.done) "重启后可再次越狱" else "选择管理器并开始",
+            /* already rooted this boot: nothing to open */
+            enabled = !state.done,
             onClick = onJailbreak
         )
         Spacer(Modifier.height(10.dp))
