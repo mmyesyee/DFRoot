@@ -202,6 +202,9 @@ static int load_module_file(const char *tag, const char *path)
         return -1;
     }
 
+    snprintf(line, sizeof(line), "%s: using %s\n", tag, path);
+    append_diag(line);
+
     int fd = open(path, O_RDONLY);
     long rc = -1;
     int err = 0;
@@ -312,17 +315,23 @@ int main(void)
     if (run_ctx(NULL, (char *[]){ KSUD_STAGE, "late-load", "--package-name", su_manager, NULL }) == 0) {
         dump_diagnostics(su_manager);
 
-        /* Control experiment first: dfroot.ko unloads itself right after init
-         * (it returns -ENODEV), so this copy is not in the kernel any more and
-         * loading it again must succeed if the loader itself is sound. */
-        if (load_module_file("dfroot.ko", "/data/user_de/0/df.root/ko") == 0)
-            touch("/dev/dfku1");
+        /* Two slots, each overridable by a user-picked file:
+         *   dfroot.ko   - built into the APK (chosen per KMI), override dfroot_custom.ko
+         *   kernelsu.ko - extracted from the manager APK,       override kernelsu_custom.ko
+         * dfroot.ko returns -ENODEV from init so the kernel drops it immediately;
+         * loading our copy again is therefore also a control experiment for the
+         * loader itself. */
+        const char *df_ko = access("/data/user_de/0/df.root/dfroot_custom.ko", R_OK) == 0
+                          ? "/data/user_de/0/df.root/dfroot_custom.ko"
+                          : "/data/user_de/0/df.root/ko";
+        const char *ksu_ko = access("/data/user_de/0/df.root/kernelsu_custom.ko", R_OK) == 0
+                          ? "/data/user_de/0/df.root/kernelsu_custom.ko"
+                          : "/data/user_de/0/df.root/kernelsu.ko";
 
-        /* The manager's own module, then anything dropped in as custom.ko -
-         * the same loader for all of them. */
-        if (load_module_file("kernelsu.ko", "/data/user_de/0/df.root/kernelsu.ko") == 0)
+        if (load_module_file("dfroot.ko", df_ko) == 0)
+            touch("/dev/dfku1");
+        if (load_module_file("kernelsu.ko", ksu_ko) == 0)
             touch("/dev/dfku0");
-        load_module_file("custom.ko", "/data/user_de/0/df.root/custom.ko");
 
         touch("/dev/dfm6");
         if (adb_root) {

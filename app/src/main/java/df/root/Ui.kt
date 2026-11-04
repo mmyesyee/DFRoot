@@ -82,7 +82,12 @@ private const val ABOUT = "DFRoot 4.7 · arm32 移植版\n\n" +
         "已在 Xiaomi Watch 2 Pro 验证。\n\n" +
         "致谢：lspromise、DFReroot、DirtyInit"
 
-private enum class Route { Home, Jailbreak, Managers, Ko, Browser, Output, Settings }
+private enum class KoSlot(val label: String, val file: String, val override: String, val note: String) {
+    Dfroot("dfroot.ko", "ko", "dfroot_custom.ko", "越狱用的内核模块 · APK 内置，按 KMI 选"),
+    Kernelsu("kernelsu.ko", "kernelsu.ko", "kernelsu_custom.ko", "管理器的内核模块 · 从管理器 APK 抽取"),
+}
+
+private enum class Route { Home, Jailbreak, Managers, Ko, KoDfroot, KoKernelsu, Browser, Output, Settings }
 
 /** Everything the screens need, hoisted out of composition so a run survives
  *  navigating away and back. */
@@ -95,6 +100,28 @@ private class AppState(val activity: ComponentActivity) {
     var done by mutableStateOf(false)
     var message by mutableStateOf<String?>(null)
     var koMessage by mutableStateOf<String?>(null)
+    var koSlot by mutableStateOf(KoSlot.Dfroot)
+
+    private fun dataDir() = deCtx.filesDir.parentFile
+    fun koDefault(slot: KoSlot) = File(dataDir(), slot.file)
+    fun koOverride(slot: KoSlot) = File(dataDir(), slot.override)
+
+    /** Pick a module for the slot currently being edited; empty means default. */
+    fun pickKo(src: File): String = try {
+        val dst = koOverride(koSlot)
+        src.inputStream().use { i -> dst.outputStream().use { o -> i.copyTo(o) } }
+        "${koSlot.label}: 已设为自定义（${dst.length()} 字节 · ${elfArch(dst)}），下次越狱生效"
+    } catch (t: Throwable) {
+        "复制失败: ${t.message}"
+    }
+
+    fun clearKo(slot: KoSlot): String = try {
+        val f = koOverride(slot)
+        val gone = !f.exists() || f.delete()
+        if (gone) "${slot.label}: 已恢复默认" else "${slot.label}: 删除失败"
+    } catch (t: Throwable) {
+        "删除失败: ${t.message}"
+    }
 
     fun refresh() {
         managers = SuManagerInfo.load(activity)
@@ -196,16 +223,29 @@ fun DfRootApp(activity: ComponentActivity) {
                 state = state,
                 onPicked = { route = Route.Jailbreak })
 
-            Route.Ko -> KoScreen(
+            Route.Ko -> KoMenuScreen(
                 activity = activity,
+                onSlot = { slot ->
+                    route = if (slot == KoSlot.Dfroot) Route.KoDfroot else Route.KoKernelsu
+                })
+
+            Route.KoDfroot -> KoSlotScreen(
+                activity = activity,
+                slot = KoSlot.Dfroot,
                 message = state.koMessage,
-                onBrowser = { route = Route.Browser })
+                onBrowser = { state.koSlot = it; route = Route.Browser })
+
+            Route.KoKernelsu -> KoSlotScreen(
+                activity = activity,
+                slot = KoSlot.Kernelsu,
+                message = state.koMessage,
+                onBrowser = { state.koSlot = it; route = Route.Browser })
 
             Route.Browser -> BrowserScreen(
                 activity = activity,
                 onPicked = { file ->
-                    state.koMessage = state.pickCustomKo(file)
-                    route = Route.Ko
+                    state.koMessage = state.pickKo(file)
+                    route = if (state.koSlot == KoSlot.Dfroot) Route.KoDfroot else Route.KoKernelsu
                 })
 
             Route.Output -> OutputScreen()
@@ -376,103 +416,120 @@ private fun ManagerScreen(state: AppState, onPicked: () -> Unit) {
 }
 
 @Composable
-private fun KoScreen(activity: ComponentActivity, message: String?, onBrowser: () -> Unit) {
+private fun KoMenuScreen(activity: ComponentActivity, onSlot: (KoSlot) -> Unit) {
     val dataDir = activity.createDeviceProtectedStorageContext().filesDir.parentFile
-    val extDir = activity.getExternalFilesDir(null)
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("内核模块", color = OnGrey, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text("不选自定义就用默认", color = Inactive, fontSize = 10.sp)
+        Spacer(Modifier.height(10.dp))
+
+        KoSlot.entries.forEach { slot ->
+            val ovr = File(dataDir, slot.override)
+            val def = File(dataDir, slot.file)
+            val custom = ovr.exists()
+            Pill(
+                bg = if (custom) Yellow else Grey,
+                fg = if (custom) OnYellow else OnGrey,
+                glyph = if (custom) "✦" else "⚙",
+                title = slot.label,
+                subtitle = if (custom) "自定义 · ${describeElf(ovr)}" else "默认 · ${describeElf(def)}",
+                onClick = { onSlot(slot) }
+            )
+            Spacer(Modifier.height(10.dp))
+        }
+    }
+}
+
+@Composable
+private fun KoSlotScreen(
+    activity: ComponentActivity,
+    slot: KoSlot,
+    message: String?,
+    onBrowser: (KoSlot) -> Unit,
+) {
+    val dataDir = activity.createDeviceProtectedStorageContext().filesDir.parentFile
+    val def = File(dataDir, slot.file)
+    val ovr = File(dataDir, slot.override)
     var info by remember { mutableStateOf<String?>(null) }
-    var refresh by remember { mutableStateOf(0) }
+    var custom by remember { mutableStateOf(ovr.exists()) }
     val scope = rememberCoroutineScope()
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             info = try {
-                val dst = File(dataDir, "custom.ko")
                 withContext(Dispatchers.IO) {
                     activity.contentResolver.openInputStream(uri).use { input ->
                         requireNotNull(input) { "openInputStream 返回 null" }
-                        dst.outputStream().use { out -> input.copyTo(out) }
+                        ovr.outputStream().use { out -> input.copyTo(out) }
                     }
                 }
-                refresh++
-                "已选用 ${dst.length()} 字节 · ${elfArch(dst)}，下次越狱时加载"
+                custom = ovr.exists()
+                "已设为自定义（${ovr.length()} 字节 · ${elfArch(ovr)}），下次越狱生效"
             } catch (t: Throwable) {
                 "复制失败: ${t.message}"
             }
         }
     }
 
-    val staged = remember(refresh) {
-        listOf(
-            "dfroot.ko" to File(dataDir, "ko"),
-            "kernelsu.ko" to File(dataDir, "kernelsu.ko"),
-            "custom.ko" to File(dataDir, "custom.ko")
-        )
-    }
-    val offered = remember(refresh) {
-        (extDir?.listFiles() ?: emptyArray<File>()).filter { it.name.endsWith(".ko") }.sortedBy { it.name }
-    }
-
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState())
             .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-        Text("加载自定义 KO", color = OnGrey, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Text(slot.label, color = OnGrey, fontSize = 17.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(4.dp))
-        Text("越狱时按 dfroot → kernelsu → custom 的顺序加载",
-             color = Inactive, fontSize = 10.sp)
+        Text(slot.note, color = Inactive, fontSize = 10.sp)
         Spacer(Modifier.height(10.dp))
 
-        staged.forEach { (name, f) ->
-            Box(
-                Modifier.fillMaxWidth().padding(vertical = 3.dp)
-                    .clip(RoundedCornerShape(20.dp)).background(Grey)
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
-            ) {
-                Column {
-                    Text(name, color = OnGrey, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text(describeElf(f), color = Inactive, fontSize = 10.sp,
-                         fontFamily = FontFamily.Monospace)
-                }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-        Pill(Grey, OnGrey, "📂", "从文件管理器选择…", "系统选择器（部分表不支持）", height = 56) {
-            picker.launch(arrayOf("*/*"))
-        }
+        KoRow(if (custom) "当前：自定义" else "当前：默认",
+              if (custom) ovr.absolutePath else def.absolutePath,
+              describeElf(if (custom) ovr else def))
         Spacer(Modifier.height(8.dp))
-        Pill(Grey, OnGrey, "🗂", "浏览本机目录…", "内置文件浏览器", height = 56, onClick = onBrowser)
 
-        Spacer(Modifier.height(12.dp))
-        Text("或从 files 目录选用：", color = OnGrey, fontSize = 12.sp)
-        Spacer(Modifier.height(4.dp))
-
-        if (offered.isEmpty()) {
-            Text("（空）adb push xxx.ko /sdcard/Android/data/df.root/files/",
-                 color = Inactive, fontSize = 10.sp)
-        } else {
-            offered.forEach { f ->
-                Pill(Grey, OnGrey, "⬇", f.name, describeElf(f), height = 56) {
-                    info = activity.let {
-                        val dst = File(
-                            it.createDeviceProtectedStorageContext().filesDir.parentFile,
-                            "custom.ko")
-                        try {
-                            f.inputStream().use { i -> dst.outputStream().use { o -> i.copyTo(o) } }
-                            refresh++
-                            "已选用 ${f.name}（${dst.length()} 字节），下次越狱时加载"
-                        } catch (t: Throwable) {
-                            "复制失败: ${t.message}"
-                        }
-                    }
+        KoRow("默认文件", def.absolutePath, describeElf(def))
+        if (custom) {
+            Spacer(Modifier.height(8.dp))
+            KoRow("自定义覆盖", ovr.absolutePath, describeElf(ovr))
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = {
+                info = try {
+                    if (ovr.delete() || !ovr.exists()) { custom = ovr.exists(); "已恢复默认" }
+                    else "删除失败"
+                } catch (t: Throwable) {
+                    "删除失败: ${t.message}"
                 }
-                Spacer(Modifier.height(8.dp))
-            }
+            }) { Text("恢复默认") }
         }
+
+        Spacer(Modifier.height(10.dp))
+        Pill(Grey, OnGrey, "📂", "从文件管理器选择…", "系统选择器（部分表不支持）",
+             height = 56) { picker.launch(arrayOf("*/*")) }
+        Spacer(Modifier.height(8.dp))
+        Pill(Grey, OnGrey, "🗂", "浏览本机目录…", "内置文件浏览器", height = 56,
+             onClick = { onBrowser(slot) })
 
         (info ?: message)?.let {
             Spacer(Modifier.height(8.dp))
             Text(it, color = Good, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun KoRow(title: String, sub: String, value: String) {
+    Box(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Grey)
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+    ) {
+        Column {
+            Text(title, color = OnGrey, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(sub, color = Inactive, fontSize = 9.sp, maxLines = 2)
+            Text(value, color = OnGrey, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
         }
     }
 }
