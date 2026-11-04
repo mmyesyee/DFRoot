@@ -587,7 +587,8 @@ private fun BrowserScreen(activity: ComponentActivity, onPicked: (File) -> Unit)
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
             items(rows, key = { it.absolutePath }) { f ->
                 val isDir = f.isDirectory
-                val isKo = f.name.endsWith(".ko")
+                /* kernelsu.ko ships as libkernelsu.so, so both suffixes count */
+                val isKo = f.name.endsWith(".ko") || f.name.endsWith(".so")
                 Row(
                     Modifier.fillMaxWidth()
                         .clickable(enabled = isDir || isKo) {
