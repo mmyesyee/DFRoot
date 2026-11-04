@@ -555,8 +555,8 @@ private fun BrowserScreen(activity: ComponentActivity, onPicked: (File) -> Unit)
         ).distinctBy { it.absolutePath }.filter { it.exists() }
     }
     val storageRoot = remember {
-        listOf(File("/storage/emulated/0"), File("/sdcard"),
-               activity.getExternalFilesDir(null), File("/"))
+        listOfNotNull(File("/storage/emulated/0"), File("/sdcard"),
+                      activity.getExternalFilesDir(null), File("/"))
             .firstOrNull { it.exists() && it.listFiles() != null } ?: File("/")
     }
     var dir by remember { mutableStateOf(storageRoot) }
