@@ -31,11 +31,13 @@ public class JailbreakActivity extends AppCompatActivity implements IReporter {
     private MaterialCardView cardManager;
     private MaterialCardView cardStart;
     private TextView tvPickSub;
+    private TextView tvStartTitle;
     private TextView tvStartSub;
 
     private final List<SuManagerInfo> mManagers = new ArrayList<>();
     private int mSelected = -1;
     private boolean mRunning = false;
+    private boolean mDone = false;          /* this run ended in SUCCESS */
 
     private Context mDeCtx;
     private final Handler mMain = new Handler(Looper.getMainLooper());
@@ -56,6 +58,7 @@ public class JailbreakActivity extends AppCompatActivity implements IReporter {
         cardManager = findViewById(R.id.cardManager);
         cardStart = findViewById(R.id.cardStart);
         tvPickSub = findViewById(R.id.tvPickSub);
+        tvStartTitle = findViewById(R.id.tvStartTitle);
         tvStartSub = findViewById(R.id.tvStartSub);
 
         mManagers.addAll(SuManagerInfo.load(this));
@@ -107,6 +110,7 @@ public class JailbreakActivity extends AppCompatActivity implements IReporter {
     private void run() {
         try {
             int rc = ExploitRunner.run(mDeCtx, this);
+            if (rc == 0) mDone = true;
             String msg = rc == 0 ? "DFRoot: SUCCESS"
                        : rc == 1 ? "DFRoot: Error - ksud nonzero exit"
                        : rc == 2 ? "DFRoot: Error - check logcat & dmesg"
@@ -125,13 +129,23 @@ public class JailbreakActivity extends AppCompatActivity implements IReporter {
 
     private void updateUi() {
         boolean has = mSelected >= 0 && mSelected < mManagers.size();
-        boolean hooked = new File("/dev/df").exists();
+
+        /* dfm6 is dropped by bootstrap once ksud late-load succeeded; /dev/df
+         * only means the payload ran. */
+        boolean done = mDone || new File("/dev/dfm6").exists();
 
         tvPickSub.setText(has
                 ? mManagers.get(mSelected).label + "  ·  点击更换"
                 : getString(R.string.card_pick_manager_none));
 
-        if (hooked) {
+        int bg = getColor(done ? R.color.card_done : R.color.card_run);
+        int fg = getColor(done ? R.color.on_card_done : R.color.on_card_run);
+        cardStart.setCardBackgroundColor(bg);
+        tvStartTitle.setTextColor(fg);
+        tvStartSub.setTextColor(fg);
+        tvStartTitle.setText(done ? R.string.card_start_done_title : R.string.card_start);
+
+        if (done) {
             tvStartSub.setText(R.string.card_start_done);
         } else if (mRunning) {
             tvStartSub.setText(R.string.card_start_busy);
@@ -141,7 +155,7 @@ public class JailbreakActivity extends AppCompatActivity implements IReporter {
             tvStartSub.setText(R.string.card_start_blocked);
         }
 
-        boolean enabled = has && !hooked && !mRunning;
+        boolean enabled = has && !done && !mRunning;
         cardStart.setEnabled(enabled);
         cardStart.setAlpha(enabled ? 1f : 0.55f);
         cardManager.setEnabled(!mRunning);

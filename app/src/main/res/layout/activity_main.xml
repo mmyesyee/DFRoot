@@ -98,6 +98,7 @@
                     android:orientation="vertical">
 
                     <TextView
+                        android:id="@+id/tvJailbreakTitle"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="@string/card_jailbreak"
@@ -106,6 +107,7 @@
                         android:textStyle="bold" />
 
                     <TextView
+                        android:id="@+id/tvJailbreakSub"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="@string/card_jailbreak_sub"

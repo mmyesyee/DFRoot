@@ -7,6 +7,10 @@
     <color name="card_run">#8C1C13</color>
     <color name="on_card_run">#FFDAD6</color>
 
+    <!-- success state -->
+    <color name="card_done">#1A5FB4</color>
+    <color name="on_card_done">#E3ECFF</color>
+
     <color name="card_neutral">#262626</color>
     <color name="on_card_neutral">#E6E1E5</color>
 

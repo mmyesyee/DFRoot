@@ -33,7 +33,8 @@
     <string name="card_start">开始越狱</string>
     <string name="card_start_ready">点击开始</string>
     <string name="card_start_busy">执行中… 详情见输出</string>
-    <string name="card_start_done">本次已完成，重启后失效</string>
+    <string name="card_start_done">重启后失效</string>
+    <string name="card_start_done_title">越狱完成</string>
     <string name="card_start_blocked">请先选择一个 root 管理器</string>
     <string name="card_about">关于</string>
     <string name="card_about_sub">版本与致谢</string>

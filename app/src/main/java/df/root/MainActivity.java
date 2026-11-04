@@ -14,6 +14,7 @@ import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import java.io.File;
@@ -34,6 +35,9 @@ public class MainActivity extends AppCompatActivity implements IReporter {
     private static final String TAG = "dfroot";
 
     private TextView tvDeviceInfo;
+    private MaterialCardView cardJailbreak;
+    private TextView tvJailbreakTitle;
+    private TextView tvJailbreakSub;
     private View pageMain;
     private View pageMore;
     private View dot0;
@@ -57,6 +61,9 @@ public class MainActivity extends AppCompatActivity implements IReporter {
         setContentView(R.layout.activity_main);
 
         tvDeviceInfo = findViewById(R.id.tvDeviceInfo);
+        cardJailbreak = findViewById(R.id.cardJailbreak);
+        tvJailbreakTitle = findViewById(R.id.tvJailbreakTitle);
+        tvJailbreakSub = findViewById(R.id.tvJailbreakSub);
         pageMain = findViewById(R.id.pageMain);
         pageMore = findViewById(R.id.pageMore);
         dot0 = findViewById(R.id.dot0);
@@ -121,6 +128,7 @@ public class MainActivity extends AppCompatActivity implements IReporter {
         int idx = SuManagerInfo.savedIndex(this, managers);
         String su = idx >= 0 ? managers.get(idx).label.toString()
                              : getString(R.string.card_manager_none);
+        boolean done = new File("/dev/dfm6").exists();
         boolean hooked = new File("/dev/df").exists();
         String abi = Build.SUPPORTED_ABIS.length > 0 ? Build.SUPPORTED_ABIS[0] : "?";
 
@@ -132,7 +140,17 @@ public class MainActivity extends AppCompatActivity implements IReporter {
         sb.append("内核   ").append(System.getProperty("os.version", "?")).append('\n');
         sb.append("ABI    ").append(abi).append('\n');
         sb.append("管理器 ").append(su).append('\n');
-        sb.append("状态   ").append(hooked ? "本次已执行" : "未执行");
+        sb.append("状态   ").append(done ? "已越狱（重启后失效）"
+                                          : hooked ? "已执行，未见结果" : "未执行");
         tvDeviceInfo.setText(sb);
+
+        /* same colour language as the jailbreak page */
+        int bg = getColor(done ? R.color.card_done : R.color.card_run);
+        int fg = getColor(done ? R.color.on_card_done : R.color.on_card_run);
+        cardJailbreak.setCardBackgroundColor(bg);
+        tvJailbreakTitle.setTextColor(fg);
+        tvJailbreakSub.setTextColor(fg);
+        tvJailbreakTitle.setText(done ? R.string.card_start_done_title : R.string.card_jailbreak);
+        tvJailbreakSub.setText(done ? R.string.card_start_done : R.string.card_jailbreak_sub);
     }
 }
