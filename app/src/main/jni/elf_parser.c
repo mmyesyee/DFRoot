@@ -311,11 +311,35 @@ int find_hook_target(const char *libcxx, const char *symname,
     }
 #else
     if (ev.is_thumb) {
-        unsigned top = (unsigned)((*first_instruction & 0xFFFFu) >> 11);
-        if (top != 0x1Du && top != 0x1Eu && top != 0x1Fu) {
-            printf("%s: hook site is a 16-bit Thumb instruction (0x%04x) - unsupported\n",
-                   libcxx, (unsigned)(*first_instruction & 0xFFFFu));
+        /* The trampoline is a 4-byte B.W, so it needs a 4-byte instruction to
+         * steal. Arm32 takes start functions with push {r4, lr} (0xb510, a
+         * 16-bit insn) far too often - walk forward to the first 32-bit
+         * Thumb-2 instruction instead of giving up. */
+        uint64_t cur = *hook_target;
+        int found = 0;
+        for (int step = 0; step < 32; step++) {          /* up to 64 bytes */
+            uint32_t w = 0;
+            if (lseek64(fd, (off64_t)cur, SEEK_SET) < 0) break;
+            if (read(fd, &w, 4) < 4) break;
+            unsigned top = (unsigned)((w & 0xFFFFu) >> 11);
+            if (top == 0x1Du || top == 0x1Eu || top == 0x1Fu) { found = 1; break; }
+            cur += 2;
+        }
+        if (!found) {
+            printf("%s: no 32-bit Thumb instruction within 64 bytes of 0x%llx\n",
+                   libcxx, (unsigned long long)*hook_target);
             close(fd); return 1;
+        }
+        if (cur != *hook_target) {
+            printf("advanced %llu bytes to the first 32-bit Thumb insn at 0x%llx\n",
+                   (unsigned long long)(cur - *hook_target), (unsigned long long)cur);
+            *hook_target = cur;
+            if (lseek64(fd, (off64_t)cur, SEEK_SET) < 0 ||
+                read(fd, first_instruction, sizeof(*first_instruction)) < 0) {
+                printf("re-read at 0x%llx failed: %s\n",
+                       (unsigned long long)cur, strerror(errno));
+                close(fd); return 1;
+            }
         }
     } else {
         printf("%s: WARNING - ARM (not Thumb) hook site, using ARM B\n", libcxx);

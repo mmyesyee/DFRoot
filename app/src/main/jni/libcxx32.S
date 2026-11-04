@@ -43,6 +43,8 @@ libcxx_ko_target_off:
 
 libcxx_start:
     push    {r0-r7, lr}                     // save everything we may clobber
+    mrs     r12, apsr                       // the hooked insn may read the flags
+    push.w  {r12}
 
     // Detect root uid = 0
     movw    r7, #SYS_getuid
@@ -137,6 +139,8 @@ myexit:
     svc     #0
 
 return:
+    pop.w   {r12}
+    msr     apsr_nzcvq, r12
     pop     {r0-r7, lr}
 
     // Stolen original instruction goes here (exp.c overwrites this slot).
