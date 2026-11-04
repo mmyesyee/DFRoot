@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/syscall.h>
+#include <errno.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -179,6 +181,48 @@ static void restart_adbd_as_root(void)
 
 /* We run as root here, but the app (and adb shell) cannot read /data/adb or
  * dmesg, so dump everything we can see into a file the app owns. */
+/* Append a line to the diagnostic file (dump_diagnostics truncates it first). */
+static void append_diag(const char *line)
+{
+    int fd = open(DIAG_PATH, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd < 0) return;
+    write(fd, line, strlen(line));
+    close(fd);
+}
+
+/* Load one kernel module, whoever it belongs to: try finit_module straight from
+ * here (we are root), then fall back to "ksud insmod", which loads with
+ * kallsyms access. Both paths are reported. */
+static int load_module_file(const char *tag, const char *path)
+{
+    char line[512];
+    if (access(path, R_OK) != 0) {
+        snprintf(line, sizeof(line), "%s: %s missing\n", tag, path);
+        append_diag(line);
+        return -1;
+    }
+
+    int fd = open(path, O_RDONLY);
+    long rc = -1;
+    int err = 0;
+    if (fd >= 0) {
+        errno = 0;
+        rc = syscall(__NR_finit_module, fd, "", 0L);
+        err = errno;
+        close(fd);
+    } else {
+        err = errno;
+    }
+    snprintf(line, sizeof(line), "%s: finit_module rc=%ld errno=%d\n", tag, rc, err);
+    append_diag(line);
+    if (rc == 0) return 0;
+
+    int krc = run_ctx(NULL, (char *[]){ KSUD_STAGE, "insmod", (char *)path, NULL });
+    snprintf(line, sizeof(line), "%s: ksud insmod rc=%d\n", tag, krc);
+    append_diag(line);
+    return krc;
+}
+
 static void dump_diagnostics(const char *su_manager)
 {
     char cmd[1400];
@@ -267,6 +311,13 @@ int main(void)
     touch("/dev/dfm5");    
     if (run_ctx(NULL, (char *[]){ KSUD_STAGE, "late-load", "--package-name", su_manager, NULL }) == 0) {
         dump_diagnostics(su_manager);
+
+        /* The manager's own kernel module first, then anything the user drops
+         * in as custom.ko - same loader for both. */
+        if (load_module_file("kernelsu.ko", "/data/user_de/0/df.root/kernelsu.ko") == 0)
+            touch("/dev/dfku0");
+        load_module_file("custom.ko", "/data/user_de/0/df.root/custom.ko");
+
         touch("/dev/dfm6");
         if (adb_root) {
             restart_adbd_as_root();
