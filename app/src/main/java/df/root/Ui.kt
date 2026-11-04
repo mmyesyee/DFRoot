@@ -55,6 +55,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
 
 private val Yellow = Color(0xFFF2C94C)
 private val OnYellow = Color(0xFF1C1A00)
@@ -76,7 +77,7 @@ private const val ABOUT = "DFRoot 4.7 · arm32 移植版\n\n" +
         "已在 Xiaomi Watch 2 Pro 验证。\n\n" +
         "致谢：lspromise、DFReroot、DirtyInit"
 
-private enum class Route { Home, Jailbreak, Managers, Output, Settings }
+private enum class Route { Home, Jailbreak, Managers, Ko, Output, Settings }
 
 /** Everything the screens need, hoisted out of composition so a run survives
  *  navigating away and back. */
@@ -102,6 +103,15 @@ private class AppState(val activity: ComponentActivity) {
     fun select(index: Int) {
         selected = index
         if (index in managers.indices) SuManagerInfo.save(activity, managers[index])
+    }
+
+    /** Copy a picked .ko into custom.ko, which bootstrap loads on the next run. */
+    fun pickCustomKo(src: File): String = try {
+        val dst = File(deCtx.filesDir.parentFile, "custom.ko")
+        src.inputStream().use { i -> dst.outputStream().use { o -> i.copyTo(o) } }
+        "已选为 custom.ko（${dst.length()} 字节），下次越狱时加载"
+    } catch (t: Throwable) {
+        "复制失败: ${t.message}"
     }
 
     fun start(scope: CoroutineScope) {
@@ -173,11 +183,14 @@ fun DfRootApp(activity: ComponentActivity) {
                 state = state,
                 scope = scope,
                 onPickManagers = { route = Route.Managers },
+                onKo = { route = Route.Ko },
                 onOutput = { route = Route.Output })
 
             Route.Managers -> ManagerScreen(
                 state = state,
                 onPicked = { route = Route.Jailbreak })
+
+            Route.Ko -> KoScreen(activity)
 
             Route.Output -> OutputScreen()
             Route.Settings -> SettingsScreen(activity)
@@ -225,6 +238,11 @@ private fun HomePage(state: AppState, onJailbreak: () -> Unit, onOutput: () -> U
         Spacer(Modifier.height(10.dp))
         InfoCard(state)
         Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(10.dp))
+        Pill(Grey, OnGrey, "⬇", "加载自定义 KO", "查看/更换要加载的内核模块",
+             height = 60, onClick = onKo)
+
+        Spacer(Modifier.height(10.dp))
         Pill(Grey, OnGrey, "☰", "输出", "查看完整日志", height = 60, onClick = onOutput)
     }
 }
@@ -249,6 +267,7 @@ private fun JailbreakScreen(
     state: AppState,
     scope: CoroutineScope,
     onPickManagers: () -> Unit,
+    onKo: () -> Unit,
     onOutput: () -> Unit,
 ) {
     val has = state.selected in state.managers.indices
@@ -297,6 +316,11 @@ private fun JailbreakScreen(
         )
         Spacer(Modifier.height(10.dp))
 
+        Spacer(Modifier.height(10.dp))
+        Pill(Grey, OnGrey, "⬇", "加载自定义 KO", "查看/更换要加载的内核模块",
+             height = 60, onClick = onKo)
+
+        Spacer(Modifier.height(10.dp))
         Pill(Grey, OnGrey, "☰", "输出", "查看完整日志", height = 60, onClick = onOutput)
 
         state.message?.let {
@@ -340,6 +364,100 @@ private fun ManagerScreen(state: AppState, onPicked: () -> Unit) {
             Spacer(Modifier.height(8.dp))
         }
     }
+}
+
+@Composable
+private fun KoScreen(activity: ComponentActivity) {
+    val dataDir = activity.createDeviceProtectedStorageContext().filesDir.parentFile
+    val extDir = activity.getExternalFilesDir(null)
+    var info by remember { mutableStateOf<String?>(null) }
+    var refresh by remember { mutableStateOf(0) }
+
+    val staged = remember(refresh) {
+        listOf(
+            "dfroot.ko" to File(dataDir, "ko"),
+            "kernelsu.ko" to File(dataDir, "kernelsu.ko"),
+            "custom.ko" to File(dataDir, "custom.ko")
+        )
+    }
+    val offered = remember(refresh) {
+        (extDir?.listFiles() ?: emptyArray<File>()).filter { it.name.endsWith(".ko") }.sortedBy { it.name }
+    }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Text("加载自定义 KO", color = OnGrey, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text("越狱时按 dfroot → kernelsu → custom 的顺序加载",
+             color = Inactive, fontSize = 10.sp)
+        Spacer(Modifier.height(10.dp))
+
+        staged.forEach { (name, f) ->
+            Box(
+                Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                    .clip(RoundedCornerShape(20.dp)).background(Grey)
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+                Column {
+                    Text(name, color = OnGrey, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(describeElf(f), color = Inactive, fontSize = 10.sp,
+                         fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Text("可从 files 目录选用：", color = OnGrey, fontSize = 12.sp)
+        Spacer(Modifier.height(4.dp))
+
+        if (offered.isEmpty()) {
+            Text("（空）adb push xxx.ko /sdcard/Android/data/df.root/files/",
+                 color = Inactive, fontSize = 10.sp)
+        } else {
+            offered.forEach { f ->
+                Pill(Grey, OnGrey, "⬇", f.name, describeElf(f), height = 56) {
+                    info = activity.let {
+                        val dst = File(
+                            it.createDeviceProtectedStorageContext().filesDir.parentFile,
+                            "custom.ko")
+                        try {
+                            f.inputStream().use { i -> dst.outputStream().use { o -> i.copyTo(o) } }
+                            refresh++
+                            "已选用 ${f.name}（${dst.length()} 字节），下次越狱时加载"
+                        } catch (t: Throwable) {
+                            "复制失败: ${t.message}"
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+
+        info?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, color = Good, fontSize = 10.sp)
+        }
+    }
+}
+
+private fun describeElf(f: File): String {
+    if (!f.exists()) return "不存在"
+    val head = ByteArray(20)
+    val n = try {
+        FileInputStream(f).use { it.read(head) }
+    } catch (t: Throwable) {
+        -1
+    }
+    if (n != head.size) return "${f.length()} 字节"
+    val machine = (head[18].toInt() and 0xff) or ((head[19].toInt() and 0xff) shl 8)
+    val arch = when (machine) {
+        183 -> "aarch64"
+        40 -> "arm32"
+        else -> "machine=$machine"
+    }
+    return "${f.length()} 字节 · $arch"
 }
 
 @Composable
