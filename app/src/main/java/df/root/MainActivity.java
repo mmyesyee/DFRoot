@@ -1,7 +1,5 @@
 package df.root;
 
-import android.app.ActionBar;
-import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -12,19 +10,13 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
-import android.view.LayoutInflater;
-import android.view.Menu;
-import android.view.MenuItem;
-import android.view.View;
-import android.view.ViewGroup;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
-import android.widget.Button;
-import android.widget.ImageView;
-import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import androidx.appcompat.app.AppCompatActivity;
+
+import com.google.android.material.card.MaterialCardView;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -32,28 +24,33 @@ import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
-public class MainActivity extends Activity implements IReporter {
+/**
+ * Watch-sized, Material 3 home screen: a stack of rounded cards, one per thing
+ * the user can do. The device has no action bar, so everything is reachable by
+ * tapping a card.
+ */
+public class MainActivity extends AppCompatActivity implements IReporter {
 
     private static final String TAG = "dfroot";
 
-    private Button btnRun;
-    private Button btnOutput;
-    private ScrollView outputScroll;
-    private TextView outputView;
-    private Spinner spinnerSuManager;
+    private MaterialCardView cardManager;
+    private MaterialCardView cardRun;
+    private TextView tvManagerTitle;
+    private TextView tvManagerSub;
+    private TextView tvRunTitle;
+    private TextView tvRunSub;
+
     private Context mDeCtx;
     private final Handler mMain = new Handler(Looper.getMainLooper());
     private final Executor mExec = Executors.newSingleThreadExecutor();
+    private final List<SuManagerEntry> mEntries = new ArrayList<>();
     private int mValidSuManagerPos = 0;
+    private boolean mRunning = false;
 
     @Override
     public void report(String msg) {
         Log.i(TAG, msg.trim());
         OutputLog.append(msg);
-        mMain.post(() -> {
-            outputView.append(msg);
-            outputScroll.post(() -> outputScroll.fullScroll(View.FOCUS_DOWN));
-        });
     }
 
     @Override
@@ -62,94 +59,120 @@ public class MainActivity extends Activity implements IReporter {
         mDeCtx = createDeviceProtectedStorageContext();
         setContentView(R.layout.activity_main);
 
-        // Theme.DirtyFrag is derived from Theme.Material.Light, which has no
-        // action bar, so getActionBar() is null on some devices (Wear OS in
-        // particular). Don't take the whole activity down over a subtitle.
-        ActionBar actionBar = getActionBar();
-        if (actionBar != null)
-            actionBar.setSubtitle("@diabl0w github/xda");
+        cardManager = findViewById(R.id.cardManager);
+        cardRun = findViewById(R.id.cardRun);
+        tvManagerTitle = findViewById(R.id.tvManagerTitle);
+        tvManagerSub = findViewById(R.id.tvManagerSub);
+        tvRunTitle = findViewById(R.id.tvRunTitle);
+        tvRunSub = findViewById(R.id.tvRunSub);
+        MaterialCardView cardOutput = findViewById(R.id.cardOutput);
 
-        btnRun = findViewById(R.id.btnRun);
-        btnOutput = findViewById(R.id.btnOutput);
-        outputScroll = findViewById(R.id.outputScroll);
-        outputView = findViewById(R.id.outputView);
-        spinnerSuManager = findViewById(R.id.spinnerSuManager);
+        loadManagers();
+
+        cardManager.setOnClickListener(v -> {
+            if (!mRunning) showManagerChooser();
+        });
+        cardOutput.setOnClickListener(v -> startActivity(new Intent(this, OutputActivity.class)));
+        findViewById(R.id.btnSettings).setOnClickListener(
+                v -> startActivity(new Intent(this, SettingsActivity.class)));
+        cardRun.setOnClickListener(v -> {
+            if (mRunning) return;
+            mRunning = true;
+            OutputLog.clear();
+            updateCards();
+            mExec.execute(this::runExploit);
+        });
+
+        updateCards();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        updateCards();
+    }
+
+    private void loadManagers() {
+        mEntries.clear();
+        mEntries.add(new SuManagerEntry(null, getString(R.string.card_manager_none), null));
 
         PackageManager pm = getPackageManager();
-        List<SuManagerEntry> entries = new ArrayList<>();
+        List<SuManagerEntry> found = new ArrayList<>();
         for (ApplicationInfo ai : pm.getInstalledApplications(0)) {
             if ((ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0) continue;
             if (!ExploitRunner.hasKsud(ai)) continue;
-            entries.add(new SuManagerEntry(ai.packageName, pm.getApplicationLabel(ai), pm.getApplicationIcon(ai)));
+            found.add(new SuManagerEntry(ai.packageName,
+                    pm.getApplicationLabel(ai), pm.getApplicationIcon(ai)));
         }
-        entries.sort((a, b) -> a.label.toString().compareToIgnoreCase(b.label.toString()));
-        entries.add(0, new SuManagerEntry(null, "Select a SU Manager", null));
-
-        spinnerSuManager.setAdapter(new SuManagerAdapter(this, entries));
+        found.sort((a, b) -> a.label.toString().compareToIgnoreCase(b.label.toString()));
+        mEntries.addAll(found);
 
         SharedPreferences prefs = mDeCtx.getSharedPreferences(ExploitRunner.PREFS_NAME, Context.MODE_PRIVATE);
         String saved = prefs.getString(ExploitRunner.PREF_SU_MANAGER, null);
-        boolean savedFound = false;
-        for (int i = 1; i < entries.size(); i++) {
-            if (entries.get(i).packageName.equals(saved)) {
-                spinnerSuManager.setSelection(i);
+        boolean found2 = false;
+        for (int i = 1; i < mEntries.size(); i++) {
+            if (mEntries.get(i).packageName.equals(saved)) {
                 mValidSuManagerPos = i;
-                savedFound = true;
+                found2 = true;
                 break;
             }
         }
-        if (!savedFound && saved != null) { // Saved manager was uninstalled
+        if (!found2 && saved != null)
             prefs.edit().remove(ExploitRunner.PREF_SU_MANAGER).apply();
-        }
-
-        spinnerSuManager.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
-                SuManagerEntry e = entries.get(pos);
-                if (e.packageName == null) return;
-                mValidSuManagerPos = pos;
-                prefs.edit().putString(ExploitRunner.PREF_SU_MANAGER, e.packageName).apply();
-                updateRunButton();
-            }
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {}
-        });
-
-        updateRunButton();
-
-        // no action bar on this device, so the overflow menu is unreachable:
-        // give the full-screen log its own button
-        btnOutput.setOnClickListener(v -> startActivity(new Intent(this, OutputActivity.class)));
-
-        btnRun.setOnClickListener(v -> {
-            btnRun.setEnabled(false);
-            outputView.setText("");
-            OutputLog.clear();
-            mExec.execute(this::runExploit);
-        });
     }
 
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.main_menu, menu);
-        return true;
+    private void showManagerChooser() {
+        if (mEntries.size() <= 1) {
+            Toast.makeText(this, R.string.no_manager, Toast.LENGTH_LONG).show();
+            return;
+        }
+        CharSequence[] labels = new CharSequence[mEntries.size() - 1];
+        for (int i = 1; i < mEntries.size(); i++)
+            labels[i - 1] = mEntries.get(i).label;
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.chooser_title)
+                .setItems(labels, (d, which) -> {
+                    int pos = which + 1;
+                    mValidSuManagerPos = pos;
+                    mDeCtx.getSharedPreferences(ExploitRunner.PREFS_NAME, Context.MODE_PRIVATE)
+                            .edit()
+                            .putString(ExploitRunner.PREF_SU_MANAGER, mEntries.get(pos).packageName)
+                            .apply();
+                    updateCards();
+                })
+                .show();
     }
 
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        if (item.getItemId() == R.id.action_output) {
-            startActivity(new Intent(this, OutputActivity.class));
-            return true;
+    private void updateCards() {
+        boolean hasManager = mValidSuManagerPos >= 1 && mValidSuManagerPos < mEntries.size();
+        if (hasManager) {
+            tvManagerTitle.setText(mEntries.get(mValidSuManagerPos).label);
+            tvManagerSub.setText(R.string.card_manager_change);
+        } else {
+            tvManagerTitle.setText(R.string.card_manager_none);
+            tvManagerSub.setText(R.string.card_manager_tap);
         }
-        if (item.getItemId() == R.id.action_settings) {
-            startActivity(new Intent(this, SettingsActivity.class));
-            return true;
-        }
-        return super.onOptionsItemSelected(item);
-    }
 
-    private void updateRunButton() {
-        btnRun.setEnabled(mValidSuManagerPos >= 1 && !new File("/dev/df").exists());
+        boolean hooked = new File("/dev/df").exists();
+        if (hooked) {
+            tvRunTitle.setText(R.string.card_run_hooked);
+            tvRunSub.setText(R.string.card_run_hooked_sub);
+        } else if (mRunning) {
+            tvRunTitle.setText(R.string.card_run_busy);
+            tvRunSub.setText(R.string.card_run_busy_sub);
+        } else if (hasManager) {
+            tvRunTitle.setText(R.string.card_run_ready);
+            tvRunSub.setText(R.string.card_run_ready_sub);
+        } else {
+            tvRunTitle.setText(R.string.card_run_none);
+            tvRunSub.setText(R.string.card_run_none_sub);
+        }
+
+        boolean enabled = hasManager && !hooked && !mRunning;
+        cardRun.setEnabled(enabled);
+        cardRun.setAlpha(enabled ? 1f : 0.55f);
+        cardManager.setEnabled(!mRunning);
     }
 
     private void runExploit() {
@@ -164,7 +187,10 @@ public class MainActivity extends Activity implements IReporter {
             Log.e(TAG, "exploit exception", e);
             report("\nexception: " + e + "\n");
         } finally {
-            mMain.post(this::updateRunButton);
+            mMain.post(() -> {
+                mRunning = false;
+                updateCards();
+            });
         }
     }
 
@@ -177,56 +203,6 @@ public class MainActivity extends Activity implements IReporter {
             this.packageName = pkg;
             this.label = label;
             this.icon = icon;
-        }
-    }
-
-    private static class SuManagerAdapter extends ArrayAdapter<SuManagerEntry> {
-        SuManagerAdapter(Context ctx, List<SuManagerEntry> items) {
-            super(ctx, R.layout.item_su_manager, items);
-        }
-
-        @Override
-        public View getView(int pos, View v, ViewGroup parent) {
-            if (v == null || v.getTag() != Boolean.FALSE)
-                v = LayoutInflater.from(getContext()).inflate(R.layout.item_su_manager_closed, parent, false);
-            v.setTag(Boolean.FALSE);
-            return bindClosedView(pos, v);
-        }
-
-        @Override
-        public View getDropDownView(int pos, View v, ViewGroup parent) {
-            if (v == null || v.getTag() != Boolean.TRUE)
-                v = LayoutInflater.from(getContext()).inflate(R.layout.item_su_manager, parent, false);
-            v.setTag(Boolean.TRUE);
-            return bindView(pos, v);
-        }
-
-        @Override
-        public boolean isEnabled(int pos) {
-            return getItem(pos).packageName != null;
-        }
-
-        private View bindClosedView(int pos, View v) {
-            SuManagerEntry e = getItem(pos);
-            ImageView icon = v.findViewById(R.id.iconApp);
-            TextView label = v.findViewById(R.id.labelApp);
-            if (e.packageName == null) {
-                icon.setVisibility(View.GONE);
-                label.setVisibility(View.VISIBLE);
-                label.setText(e.label);
-            } else {
-                icon.setVisibility(View.VISIBLE);
-                label.setVisibility(View.GONE);
-                icon.setImageDrawable(e.icon);
-            }
-            return v;
-        }
-
-        private View bindView(int pos, View v) {
-            SuManagerEntry e = getItem(pos);
-            ((ImageView) v.findViewById(R.id.iconApp)).setImageDrawable(e.icon);
-            ((TextView)  v.findViewById(R.id.labelApp)).setText(e.label);
-            return v;
         }
     }
 }

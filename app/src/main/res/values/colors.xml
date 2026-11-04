@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- watch: fixed palette, black background, one colour per action -->
+    <color name="card_manager">#F2C94C</color>
+    <color name="on_card_manager">#1C1A00</color>
+
+    <color name="card_run">#8C1C13</color>
+    <color name="on_card_run">#FFDAD6</color>
+
+    <color name="card_neutral">#262626</color>
+    <color name="on_card_neutral">#E6E1E5</color>
+
+    <color name="dot_active">#FFFFFF</color>
+    <color name="dot_inactive">#5A5A5A</color>
+</resources>

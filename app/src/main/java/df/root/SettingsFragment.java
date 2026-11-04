@@ -5,22 +5,22 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
-import android.preference.PreferenceFragment;
-import android.preference.SwitchPreference;
 
-public class SettingsFragment extends PreferenceFragment {
+import androidx.preference.PreferenceFragmentCompat;
+import androidx.preference.SwitchPreferenceCompat;
+
+public class SettingsFragment extends PreferenceFragmentCompat {
 
     @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        addPreferencesFromResource(R.xml.preferences);
+    public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
+        setPreferencesFromResource(R.xml.preferences, rootKey);
 
         Context ctx = getActivity();
         SharedPreferences dePrefs = ctx.createDeviceProtectedStorageContext()
                 .getSharedPreferences(ExploitRunner.PREFS_NAME, Context.MODE_PRIVATE);
 
         ComponentName bootReceiver = new ComponentName(ctx, BootReceiver.class);
-        SwitchPreference bootPref = (SwitchPreference) findPreference("boot_start");
+        SwitchPreferenceCompat bootPref = findPreference("boot_start");
         bootPref.setPersistent(false);
         int state = ctx.getPackageManager().getComponentEnabledSetting(bootReceiver);
         bootPref.setChecked(state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED);
@@ -32,27 +32,17 @@ public class SettingsFragment extends PreferenceFragment {
             return true;
         });
 
-        SwitchPreference softRebootPref = (SwitchPreference) findPreference("soft_reboot");
-        softRebootPref.setPersistent(false);
-        softRebootPref.setChecked(dePrefs.getBoolean("soft_reboot", false));
-        softRebootPref.setOnPreferenceChangeListener((pref, value) -> {
-            dePrefs.edit().putBoolean("soft_reboot", (Boolean) value).apply();
-            return true;
-        });
+        bindSwitch(dePrefs, "soft_reboot");
+        bindSwitch(dePrefs, "disable_modules");
+        bindSwitch(dePrefs, "adb_root");
+    }
 
-        SwitchPreference adbRootPref = (SwitchPreference) findPreference("adb_root");
-        adbRootPref.setPersistent(false);
-        adbRootPref.setChecked(dePrefs.getBoolean("adb_root", false));
-        adbRootPref.setOnPreferenceChangeListener((pref, value) -> {
-            dePrefs.edit().putBoolean("adb_root", (Boolean) value).apply();
-            return true;
-        });
-
-        SwitchPreference disableModulesPref = (SwitchPreference) findPreference("disable_modules");
-        disableModulesPref.setPersistent(false);
-        disableModulesPref.setChecked(dePrefs.getBoolean("disable_modules", false));
-        disableModulesPref.setOnPreferenceChangeListener((pref, value) -> {
-            dePrefs.edit().putBoolean("disable_modules", (Boolean) value).apply();
+    private void bindSwitch(SharedPreferences prefs, String key) {
+        SwitchPreferenceCompat pref = findPreference(key);
+        pref.setPersistent(false);
+        pref.setChecked(prefs.getBoolean(key, false));
+        pref.setOnPreferenceChangeListener((p, value) -> {
+            prefs.edit().putBoolean(key, (Boolean) value).apply();
             return true;
         });
     }

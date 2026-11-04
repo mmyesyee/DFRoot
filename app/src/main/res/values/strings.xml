@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_title">主页</string>
+
+    <string name="card_manager_none">未选择管理器</string>
+    <string name="card_manager_tap">点击查看</string>
+    <string name="card_manager_change">点击更换</string>
+
+    <string name="card_run_none">未就绪</string>
+    <string name="card_run_none_sub">请先选择一个 SU 管理器</string>
+    <string name="card_run_ready">启动 Root</string>
+    <string name="card_run_ready_sub">点击执行</string>
+    <string name="card_run_busy">执行中…</string>
+    <string name="card_run_busy_sub">详情见输出页</string>
+    <string name="card_run_hooked">已 Root</string>
+    <string name="card_run_hooked_sub">本次已完成，重启后失效</string>
+
+    <string name="card_output">输出</string>
+    <string name="card_output_sub">查看完整日志</string>
+
+    <string name="action_settings">设置</string>
+    <string name="chooser_title">选择 SU 管理器</string>
+    <string name="no_manager">没有找到带 ksud 的管理器</string>
+</resources>
